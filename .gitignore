@@ -20,22 +20,41 @@
 # production
 /build
 
-# misc
+# misc & OS
 .DS_Store
 *.pem
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
 
-# debug
+# debug & logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.log
 
-# env files (can opt-in for committing if needed)
+# env files (Block all secrets, whitelist template)
 .env*
+!.env.example
 
-# vercel
+# PocketBase local database & backups
+pb_data/
+pb_public/
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+
+# vercel & cloudflare
 .vercel
+.wrangler
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
