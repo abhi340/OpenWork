@@ -39,6 +39,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, pass: string) => Promise<AuthResult>;
   signup: (email: string, pass: string, name: string) => Promise<AuthResult>;
+  loginWithOAuth: (provider: "google" | "microsoft" | "github") => Promise<AuthResult>;
   logout: () => void;
   setRole: (role: UserRole) => void;
   setWorkspaceName: (name: string) => void;
@@ -191,6 +192,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const loginWithOAuth = async (provider: "google" | "microsoft" | "github"): Promise<AuthResult> => {
+    try {
+      setIsLoading(true);
+      const authData = await pb.collection("users").authWithOAuth2({ provider });
+      
+      // Auto-extract corporate domain name if corporate email
+      if (authData.record?.email) {
+        const domain = authData.record.email.split("@")[1];
+        if (domain && !["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"].includes(domain.toLowerCase())) {
+          const companyName = domain.split(".")[0];
+          const capitalizedCompany = companyName.charAt(0).toUpperCase() + companyName.slice(1) + " Workspace";
+          pb.collection("users").update(authData.record.id, {
+            workspaceName: capitalizedCompany
+          }).catch(() => {});
+        }
+      }
+
+      syncFromAuthStore();
+      setIsLoading(false);
+      return { success: true };
+    } catch (err: any) {
+      setIsLoading(false);
+      const message = err?.response?.message || err?.message || `Could not authenticate with ${provider}. Ensure OAuth2 is enabled in PocketBase.`;
+      return { success: false, error: message };
+    }
+  };
+
   const logout = () => {
     pb.authStore.clear();
     syncFromAuthStore();
@@ -251,6 +279,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       isLoading,
       login,
       signup,
+      loginWithOAuth,
       logout,
       setRole, 
       setWorkspaceName, 
