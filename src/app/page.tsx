@@ -91,7 +91,7 @@ export default function Dashboard() {
     });
   };
 
-  // Global Power-User Hotkeys (Z, S, P, B, N)
+  // Global Power-User Hotkeys (E, S, Z, P, B, T)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -107,21 +107,24 @@ export default function Dashboard() {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       const key = e.key.toLowerCase();
-      if (key === "z") {
-        e.preventDefault();
-        setIsZenModeOpen((prev) => !prev);
-      } else if (key === "s" && blocks.length > 0) {
+      if (key === "e" && blocks.length > 0) {
         e.preventDefault();
         setIsSummaryModalOpen((prev) => !prev);
+      } else if (key === "z") {
+        e.preventDefault();
+        setIsZenModeOpen((prev) => !prev);
+      } else if (key === "s") {
+        e.preventDefault();
+        toggleScratchpad();
       } else if (key === "p" && blocks.length > 0) {
         e.preventDefault();
         setIsPortfolioModalOpen((prev) => !prev);
       } else if (key === "b") {
         e.preventDefault();
         setIsPersonaModalOpen((prev) => !prev);
-      } else if (key === "n") {
+      } else if (key === "t") {
         e.preventDefault();
-        toggleScratchpad();
+        setIsTriageModalOpen((prev) => !prev);
       }
     };
 
@@ -210,13 +213,13 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Action Toolbar - Touch-friendly & horizontally scrollable on mobile */}
+          {/* Action Toolbar */}
           <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1 flex-nowrap md:flex-wrap">
             {/* Morning Triage button */}
             <button
               onClick={() => setIsTriageModalOpen(true)}
               className="px-3 py-1.5 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs flex-shrink-0"
-              title="Clean morning rollover and backlog resolver"
+              title="Clean morning rollover and backlog resolver (T)"
             >
               <Sunrise size={13} />
               <span>Triage</span>
@@ -226,7 +229,7 @@ export default function Dashboard() {
             <button
               onClick={() => setIsZenModeOpen(true)}
               className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs flex-shrink-0"
-              title="Enter full-screen Zen Focus HUD mode"
+              title="Enter full-screen Zen Focus HUD mode (Z)"
             >
               <Maximize2 size={13} />
               <span>Zen HUD</span>
@@ -236,21 +239,22 @@ export default function Dashboard() {
             <button
               onClick={() => setIsPersonaModalOpen(true)}
               className="px-3 py-1.5 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs flex-shrink-0"
-              title="Load role workflow blueprint (CEO, Engineer, Sales, Intern)"
+              title="Load role workflow blueprint (B)"
             >
               <Sparkles size={13} className="text-blue-500" />
               <span>Blueprints</span>
             </button>
 
-            {/* Daily Standup */}
+            {/* Daily Standup & EOD Synthesis */}
             <button
               onClick={() => setIsSummaryModalOpen(true)}
               disabled={blocks.length === 0}
               className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-40 shadow-2xs flex-shrink-0"
-              title="Generate 1-click standup report"
+              title="Generate 1-click EOD executive report (E)"
             >
               <FileCheck2 size={13} />
-              <span>Standup</span>
+              <span>EOD Report</span>
+              <kbd className="hidden sm:inline px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-200/60 dark:bg-emerald-900/80 font-bold">E</kbd>
             </button>
 
             {/* Proof of Work Portfolio */}
@@ -258,7 +262,7 @@ export default function Dashboard() {
               onClick={() => setIsPortfolioModalOpen(true)}
               disabled={blocks.length === 0}
               className="px-3 py-1.5 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors disabled:opacity-40 shadow-2xs flex-shrink-0"
-              title="Export Proof of Work Portfolio"
+              title="Export Proof of Work Portfolio (P)"
             >
               <Award size={13} />
               <span>Portfolio</span>
