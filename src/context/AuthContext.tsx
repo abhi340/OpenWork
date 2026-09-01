@@ -221,8 +221,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = () => {
     pb.authStore.clear();
+    localStorage.removeItem("openwork_user_profile");
+    setIsAuthenticated(false);
     syncFromAuthStore();
-    // Dispatch storage event to notify other tabs/stores
     window.dispatchEvent(new Event("openwork_auth_changed"));
   };
 

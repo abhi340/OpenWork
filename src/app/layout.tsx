@@ -4,6 +4,7 @@ import "./globals.css";
 import { Sidebar } from "@/components/ui/Sidebar";
 import { MobileNavbar } from "@/components/ui/MobileNavbar";
 import { FloatingAICopilot } from "@/components/ui/FloatingAICopilot";
+import { AppShell } from "@/components/layout/AppShell";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { AuthProvider } from "@/context/AuthContext";
 
@@ -42,21 +43,7 @@ export default function RootLayout({
       <body className="flex flex-col lg:flex-row h-screen overflow-hidden bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 font-sans transition-colors duration-150">
         <ThemeProvider>
           <AuthProvider>
-            {/* Desktop Sidebar (visible on screens >= 1024px) */}
-            <div className="hidden lg:flex h-full">
-              <Sidebar />
-            </div>
-
-            {/* Mobile Header (< 1024px) */}
-            <MobileNavbar />
-
-            {/* Main scrollable content area */}
-            <main className="flex-1 overflow-y-auto bg-white dark:bg-zinc-950 min-w-0 relative">
-              {children}
-
-              {/* Floating AI Execution Copilot (Local Ollama / BYO-Key) */}
-              <FloatingAICopilot />
-            </main>
+            <AppShell>{children}</AppShell>
           </AuthProvider>
         </ThemeProvider>
       </body>
