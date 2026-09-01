@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { pb } from '@/lib/pocketbase';
 
 export type BlockType = 
   | 'counter_batch' 
@@ -36,6 +35,7 @@ interface WorkspaceState {
 
 // Local cache helper
 const CACHE_KEY = "openwork_blocks_cache";
+
 const getCachedBlocks = (): WorkBlock[] => {
   if (typeof window === "undefined") return [];
   try {
@@ -53,6 +53,18 @@ const saveCachedBlocks = (blocks: WorkBlock[]) => {
   } catch (e) {}
 };
 
+const getCurrentUserId = (): string => {
+  if (typeof window === "undefined") return "default_user";
+  try {
+    const profile = localStorage.getItem("openwork_user_profile");
+    if (profile) {
+      const parsed = JSON.parse(profile);
+      return parsed.id || parsed.email || "default_user";
+    }
+  } catch (e) {}
+  return "default_user";
+};
+
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   blocks: getCachedBlocks(),
   activeBlockId: null,
@@ -61,14 +73,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   fetchBlocks: async () => {
     try {
       set({ isLoading: true });
-      const currentUserId = pb.authStore.record?.id || "default_user";
+      const currentUserId = getCurrentUserId();
 
-      // 1. Try Cloudflare D1 Serverless API
+      // Cloudflare D1 Serverless Edge API
       try {
         const res = await fetch(`/api/blocks?userId=${encodeURIComponent(currentUserId)}`);
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data.blocks) && data.blocks.length > 0) {
+          if (Array.isArray(data.blocks)) {
             set({ blocks: data.blocks, isLoading: false });
             saveCachedBlocks(data.blocks);
             return;
@@ -76,201 +88,118 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         }
       } catch (d1Err) {}
 
-      // 2. Fallback to PocketBase if available
-      let filter = '';
-      if (currentUserId && currentUserId !== "default_user") {
-        filter = `config.userId = "${currentUserId}" || config.userId = null || config.userId = ""`;
-      }
-
-      const records = await pb.collection('daily_blocks').getFullList({
-        sort: 'order_index',
-        filter: filter || undefined,
-        requestKey: null
-      });
-
-      const formatted: WorkBlock[] = records.map((r: any) => ({
-        id: r.id,
-        type: r.block_type as BlockType,
-        title: r.title,
-        config: r.config || {},
-        items: r.items || [],
-        order_index: r.order_index || 0
-      }));
-
-      set({ blocks: formatted, isLoading: false });
-      saveCachedBlocks(formatted);
-    } catch (err: any) {
-      // 3. Fallback to LocalStorage cache
+      // Fallback to local cached blocks
       const cached = getCachedBlocks();
       set({ blocks: cached, isLoading: false });
+    } catch (err) {
+      console.warn("Failed to fetch blocks from Cloudflare D1:", err);
+      set({ isLoading: false });
     }
   },
 
-  addBlock: async (block) => {
-    const newId = crypto.randomUUID();
-    const currentUserId = pb.authStore.record?.id || "default_user";
-    const enrichedConfig = {
-      ...(block.config || {}),
-      userId: currentUserId
+  addBlock: async (newBlock) => {
+    const id = "block_" + Math.random().toString(36).substring(2, 9) + Date.now().toString(36);
+    const order_index = get().blocks.length;
+    const currentUserId = getCurrentUserId();
+    const targetDate = newBlock.config?.date || new Date().toISOString().split("T")[0];
+
+    const block: WorkBlock = {
+      id,
+      ...newBlock,
+      order_index,
+      config: {
+        ...newBlock.config,
+        userId: currentUserId,
+        date: targetDate
+      }
     };
 
-    const newBlock: WorkBlock = {
-      id: newId,
-      type: block.type,
-      title: block.title,
-      config: enrichedConfig,
-      items: block.items || [],
-      order_index: block.order_index
-    };
+    // 1. Optimistic local state update
+    const nextBlocks = [...get().blocks, block];
+    set({ blocks: nextBlocks });
+    saveCachedBlocks(nextBlocks);
 
-    // Optimistic UI Update
-    const updated = [...get().blocks, newBlock];
-    set({ blocks: updated });
-    saveCachedBlocks(updated);
-
-    // 1. Sync with Cloudflare D1 API
+    // 2. Sync with Cloudflare D1
     try {
       await fetch('/api/blocks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...newBlock,
-          userId: currentUserId
+          id: block.id,
+          userId: currentUserId,
+          title: block.title,
+          type: block.type,
+          config: block.config,
+          items: block.items || [],
+          order_index: block.order_index,
+          date: targetDate
         })
       });
-    } catch (e) {}
-
-    // 2. Sync with PocketBase if connected
-    try {
-      await pb.collection('daily_blocks').create({
-        id: newId,
-        title: block.title,
-        block_type: block.type,
-        config: enrichedConfig,
-        items: block.items || [],
-        order_index: block.order_index
-      }, { requestKey: null });
-    } catch (err: any) {}
+    } catch (err) {
+      console.warn("Could not sync block creation to Cloudflare D1 (saved locally):", err);
+    }
   },
 
   removeBlock: async (id) => {
-    // Optimistic UI Update
-    const updated = get().blocks.filter((b) => b.id !== id);
+    // 1. Optimistic local update
+    const nextBlocks = get().blocks.filter((b) => b.id !== id);
     set({
-      blocks: updated,
+      blocks: nextBlocks,
       activeBlockId: get().activeBlockId === id ? null : get().activeBlockId
     });
-    saveCachedBlocks(updated);
+    saveCachedBlocks(nextBlocks);
 
-    // 1. Sync with Cloudflare D1 API
+    // 2. Sync with Cloudflare D1
     try {
       await fetch(`/api/blocks?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-    } catch (e) {}
-
-    // 2. Sync with PocketBase
-    try {
-      await pb.collection('daily_blocks').delete(id, { requestKey: null });
-    } catch (err: any) {}
+    } catch (err) {
+      console.warn("Could not sync block deletion to Cloudflare D1:", err);
+    }
   },
 
   updateBlock: async (id, updates) => {
-    // Optimistic UI update
-    const updated = get().blocks.map((b) => (b.id === id ? { ...b, ...updates } : b));
-    set({ blocks: updated });
-    saveCachedBlocks(updated);
+    // 1. Optimistic local update
+    const nextBlocks = get().blocks.map((b) => (b.id === id ? { ...b, ...updates } : b));
+    set({ blocks: nextBlocks });
+    saveCachedBlocks(nextBlocks);
 
-    // 1. Sync with Cloudflare D1 API
+    // 2. Sync with Cloudflare D1
     try {
       await fetch('/api/blocks', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, updates })
       });
-    } catch (e) {}
-
-    // 2. Sync with PocketBase
-    try {
-      const current = get().blocks.find((b) => b.id === id);
-      if (current) {
-        await pb.collection('daily_blocks').update(id, {
-          title: updates.title ?? current.title,
-          config: updates.config ?? current.config,
-          items: updates.items ?? current.items,
-          order_index: updates.order_index ?? current.order_index
-        }, { requestKey: null });
-      }
-    } catch (err: any) {}
+    } catch (err) {
+      console.warn("Could not sync block update to Cloudflare D1:", err);
+    }
   },
 
   clearAllBlocks: async () => {
-    const currentBlocks = get().blocks;
+    const currentUserId = getCurrentUserId();
     set({ blocks: [], activeBlockId: null });
     saveCachedBlocks([]);
 
-    // 1. Sync with Cloudflare D1 API
     try {
-      await fetch('/api/blocks?clearAll=true', { method: 'DELETE' });
-    } catch (e) {}
-
-    // 2. Sync with PocketBase
-    for (const b of currentBlocks) {
-      try {
-        await pb.collection('daily_blocks').delete(b.id, { requestKey: null });
-      } catch (e) {}
+      await fetch(`/api/blocks?clearAll=true&userId=${encodeURIComponent(currentUserId)}`, { method: 'DELETE' });
+    } catch (err) {
+      console.warn("Could not clear blocks on Cloudflare D1:", err);
     }
   },
 
   setActiveBlock: (id) => set({ activeBlockId: id }),
 
   initRealtime: () => {
-    try {
-      pb.collection('daily_blocks').subscribe('*', (e) => {
-        if (e.action === 'create') {
-          const newBlock: WorkBlock = {
-            id: e.record.id,
-            type: e.record.block_type as BlockType,
-            title: e.record.title,
-            config: e.record.config || {},
-            items: e.record.items || [],
-            order_index: e.record.order_index || 0
-          };
-          set((state) => {
-            if (state.blocks.some((b) => b.id === newBlock.id)) return state;
-            const next = [...state.blocks, newBlock];
-            saveCachedBlocks(next);
-            return { blocks: next };
-          });
-        } else if (e.action === 'delete') {
-          set((state) => {
-            const next = state.blocks.filter((b) => b.id !== e.record.id);
-            saveCachedBlocks(next);
-            return { blocks: next };
-          });
-        } else if (e.action === 'update') {
-          set((state) => {
-            const next = state.blocks.map((b) =>
-              b.id === e.record.id
-                ? {
-                    ...b,
-                    title: e.record.title,
-                    config: e.record.config || {},
-                    items: e.record.items || [],
-                    order_index: e.record.order_index
-                  }
-                : b
-            );
-            saveCachedBlocks(next);
-            return { blocks: next };
-          });
-        }
-      });
-
-      return () => {
-        pb.collection('daily_blocks').unsubscribe('*');
-      };
-    } catch (err) {
-      return () => {};
-    }
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === CACHE_KEY && e.newValue) {
+        try {
+          set({ blocks: JSON.parse(e.newValue) });
+        } catch (err) {}
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
   }
 }));
-

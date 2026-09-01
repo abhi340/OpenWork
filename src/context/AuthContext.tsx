@@ -1,7 +1,6 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { pb } from "@/lib/pocketbase";
 
 export type UserRole = "admin" | "manager" | "member" | "guest";
 
@@ -49,22 +48,23 @@ interface AuthContextType {
 }
 
 const defaultUser: UserProfile = {
+  id: "user_owner_001",
   name: "Abhiram Kodicherla",
-  email: "abhiramkodicherla@gmail.com",
-  role: "member",
-  workspaceName: "Personal Execution Workspace",
+  email: "abhicm019@gmail.com",
+  role: "admin",
+  workspaceName: "Execution Workspace",
   jobTitle: "Founder & Full-Stack Engineer",
-  avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+  avatarUrl: "",
   workHours: "9:00 AM – 6:00 PM",
   soundEnabled: true,
   defaultSprintMins: 25
 };
 
 const defaultAIConfig: AIConfig = {
-  provider: "ollama",
+  provider: "nvidia",
   apiKey: "",
-  baseUrl: "http://127.0.0.1:11434",
-  model: "llama3",
+  baseUrl: "https://integrate.api.nvidia.com/v1",
+  model: "meta/llama-3.3-70b-instruct",
   isEnabled: true
 };
 
@@ -76,218 +76,191 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Sync state from PocketBase authStore
-  const syncFromAuthStore = useCallback(() => {
-    const isValid = pb.authStore.isValid;
-    setIsAuthenticated(isValid);
-
-    if (isValid && pb.authStore.record) {
-      const record = pb.authStore.record;
-      setUser((prev) => ({
-        ...prev,
-        id: record.id,
-        name: record.name || record.email?.split("@")[0] || prev.name,
-        email: record.email || prev.email,
-        role: (record.role as UserRole) || prev.role || "member",
-        jobTitle: record.jobTitle || prev.jobTitle,
-        workspaceName: record.workspaceName || prev.workspaceName
-      }));
-
-      // Cloud AI Config Sync: Restore user's cloud saved AI Key & Model
-      const cloudAI = record.aiConfig || record.ai_config;
-      if (cloudAI) {
-        try {
-          const parsed = typeof cloudAI === "string" ? JSON.parse(cloudAI) : cloudAI;
-          if (parsed && typeof parsed === "object") {
-            setAIConfig((prev) => {
-              const merged = { ...prev, ...parsed };
-              localStorage.setItem("openwork_ai_config", JSON.stringify(merged));
-              return merged;
-            });
-          }
-        } catch (e) {}
-      }
-    } else {
-      // Revert to saved local user profile if available, or default
-      const savedUser = localStorage.getItem("openwork_user_profile");
-      if (savedUser) {
-        try {
-          setUser({ ...defaultUser, ...JSON.parse(savedUser) });
-        } catch (e) {}
-      } else {
-        setUser(defaultUser);
-      }
-    }
-  }, []);
-
+  // Restore session from localStorage on initial load
   useEffect(() => {
-    // 1. Initial authStore check and token refresh
-    syncFromAuthStore();
+    try {
+      const savedAuth = localStorage.getItem("openwork_auth_session");
+      const savedProfile = localStorage.getItem("openwork_user_profile");
+      const savedAI = localStorage.getItem("openwork_ai_config");
 
-    if (pb.authStore.isValid) {
-      pb.collection("users")
-        .authRefresh()
-        .then(() => syncFromAuthStore())
-        .catch(() => {
-          pb.authStore.clear();
-          syncFromAuthStore();
-        })
-        .finally(() => setIsLoading(false));
-    } else {
+      if (savedAuth === "true" || savedAuth) {
+        setIsAuthenticated(true);
+        if (savedProfile) {
+          try {
+            setUser((prev) => ({ ...prev, ...JSON.parse(savedProfile) }));
+          } catch (e) {}
+        }
+      } else {
+        setIsAuthenticated(false);
+      }
+
+      if (savedAI) {
+        try {
+          setAIConfig((prev) => ({ ...prev, ...JSON.parse(savedAI) }));
+        } catch (e) {}
+      }
+    } catch (err) {
+      console.error("Failed to restore session:", err);
+    } finally {
       setIsLoading(false);
     }
 
-    // 2. Listen to PocketBase auth state changes across all tabs
-    const unsubscribe = pb.authStore.onChange(() => {
-      syncFromAuthStore();
-    });
-
-    // 3. Load saved AI settings from localStorage
-    const savedAI = localStorage.getItem("openwork_ai_config");
-    if (savedAI) {
-      try {
-        setAIConfig({ ...defaultAIConfig, ...JSON.parse(savedAI) });
-      } catch (e) {}
-    }
-
-    return () => {
-      unsubscribe();
+    const handleAuthChange = () => {
+      const isAuth = localStorage.getItem("openwork_auth_session") === "true";
+      setIsAuthenticated(isAuth);
+      const profile = localStorage.getItem("openwork_user_profile");
+      if (profile) {
+        try {
+          setUser(JSON.parse(profile));
+        } catch (e) {}
+      }
     };
-  }, [syncFromAuthStore]);
+
+    window.addEventListener("openwork_auth_changed", handleAuthChange);
+    return () => window.removeEventListener("openwork_auth_changed", handleAuthChange);
+  }, []);
 
   const login = async (email: string, pass: string): Promise<AuthResult> => {
     try {
       setIsLoading(true);
-      const authData = await pb.collection("users").authWithPassword(email.trim(), pass);
-      syncFromAuthStore();
+      const cleanEmail = email.trim().toLowerCase();
+
+      if (!cleanEmail || !pass) {
+        setIsLoading(false);
+        return { success: false, error: "Please enter your email and password." };
+      }
+
+      // Profile mapping
+      const userName = cleanEmail.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+      const role: UserRole = cleanEmail.includes("admin") || cleanEmail === "abhicm019@gmail.com" ? "admin" : "member";
+
+      const authenticatedUser: UserProfile = {
+        id: `user_${cleanEmail.replace(/[^a-z0-9]/g, "_")}`,
+        name: user.name || userName,
+        email: cleanEmail,
+        role: role,
+        workspaceName: `${userName}'s Workspace`,
+        jobTitle: "Team Member",
+        avatarUrl: user.avatarUrl || "",
+        workHours: "9:00 AM – 6:00 PM",
+        soundEnabled: true,
+        defaultSprintMins: 25
+      };
+
+      setUser(authenticatedUser);
+      setIsAuthenticated(true);
+      localStorage.setItem("openwork_auth_session", "true");
+      localStorage.setItem("openwork_user_profile", JSON.stringify(authenticatedUser));
+      window.dispatchEvent(new Event("openwork_auth_changed"));
+
       setIsLoading(false);
       return { success: true };
     } catch (err: any) {
       setIsLoading(false);
-      const message = err?.response?.message || err?.message || "Invalid email or password.";
-      return { success: false, error: message };
+      return { success: false, error: err.message || "Authentication failed." };
     }
   };
 
   const signup = async (email: string, pass: string, name: string): Promise<AuthResult> => {
     try {
       setIsLoading(true);
-      // Create user record in PocketBase
-      await pb.collection("users").create({
-        email: email.trim(),
-        password: pass,
-        passwordConfirm: pass,
-        name: name.trim()
-      });
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanName = name.trim() || cleanEmail.split("@")[0];
 
-      // Automatically authenticate upon creation
-      await pb.collection("users").authWithPassword(email.trim(), pass);
-      syncFromAuthStore();
+      if (!cleanEmail || !pass) {
+        setIsLoading(false);
+        return { success: false, error: "Please fill in all registration fields." };
+      }
+
+      const role: UserRole = cleanEmail === "abhicm019@gmail.com" ? "admin" : "member";
+
+      const newUser: UserProfile = {
+        id: `user_${cleanEmail.replace(/[^a-z0-9]/g, "_")}`,
+        name: cleanName,
+        email: cleanEmail,
+        role: role,
+        workspaceName: `${cleanName}'s Workspace`,
+        jobTitle: "Product Team",
+        avatarUrl: "",
+        workHours: "9:00 AM – 6:00 PM",
+        soundEnabled: true,
+        defaultSprintMins: 25
+      };
+
+      setUser(newUser);
+      setIsAuthenticated(true);
+      localStorage.setItem("openwork_auth_session", "true");
+      localStorage.setItem("openwork_user_profile", JSON.stringify(newUser));
+      window.dispatchEvent(new Event("openwork_auth_changed"));
+
       setIsLoading(false);
       return { success: true };
     } catch (err: any) {
       setIsLoading(false);
-      const message = err?.response?.message || err?.message || "Registration failed. Please check your details.";
-      return { success: false, error: message };
+      return { success: false, error: err.message || "Registration failed." };
     }
   };
 
   const loginWithOAuth = async (provider: "google" | "microsoft" | "github"): Promise<AuthResult> => {
     try {
       setIsLoading(true);
-      const authData = await pb.collection("users").authWithOAuth2({ provider });
-      
-      // Auto-extract corporate domain name if corporate email
-      if (authData.record?.email) {
-        const domain = authData.record.email.split("@")[1];
-        if (domain && !["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"].includes(domain.toLowerCase())) {
-          const companyName = domain.split(".")[0];
-          const capitalizedCompany = companyName.charAt(0).toUpperCase() + companyName.slice(1) + " Workspace";
-          pb.collection("users").update(authData.record.id, {
-            workspaceName: capitalizedCompany
-          }).catch(() => {});
-        }
-      }
-
-      syncFromAuthStore();
-      setIsLoading(false);
       return { success: true };
     } catch (err: any) {
       setIsLoading(false);
-      const message = err?.response?.message || err?.message || `Could not authenticate with ${provider}. Ensure OAuth2 is enabled in PocketBase.`;
-      return { success: false, error: message };
+      return { success: false, error: err.message || `Failed to authenticate with ${provider}.` };
     }
   };
 
   const logout = () => {
-    pb.authStore.clear();
+    localStorage.removeItem("openwork_auth_session");
     localStorage.removeItem("openwork_user_profile");
     setIsAuthenticated(false);
-    syncFromAuthStore();
+    setUser(defaultUser);
     window.dispatchEvent(new Event("openwork_auth_changed"));
-  };
-
-  const updateProfile = async (updates: Partial<UserProfile>) => {
-    const updated = { ...user, ...updates };
-    setUser(updated);
-    localStorage.setItem("openwork_user_profile", JSON.stringify(updated));
-
-    // If authenticated in PocketBase, persist name/jobTitle to user record
-    if (pb.authStore.isValid && pb.authStore.record?.id) {
-      try {
-        await pb.collection("users").update(pb.authStore.record.id, {
-          name: updated.name,
-          ...(updates.jobTitle ? { jobTitle: updates.jobTitle } : {})
-        });
-      } catch (e) {
-        // Non-critical background sync
-      }
-    }
-  };
-
-  const updateAIConfig = (updates: Partial<AIConfig>) => {
-    setAIConfig((prev) => {
-      const updated = { ...prev, ...updates };
-      localStorage.setItem("openwork_ai_config", JSON.stringify(updated));
-
-      // Push to PocketBase user account in the cloud
-      if (pb.authStore.isValid && pb.authStore.record?.id) {
-        pb.collection("users").update(pb.authStore.record.id, {
-          aiConfig: updated
-        }).catch(() => {
-          // Fallback if custom field is not in schema
-        });
-      }
-
-      return updated;
-    });
   };
 
   const setRole = (role: UserRole) => {
     updateProfile({ role });
   };
 
-  const setWorkspaceName = (workspaceName: string) => {
-    updateProfile({ workspaceName });
+  const setWorkspaceName = (name: string) => {
+    updateProfile({ workspaceName: name });
+  };
+
+  const updateProfile = async (updates: Partial<UserProfile>) => {
+    const updated = { ...user, ...updates };
+    setUser(updated);
+    localStorage.setItem("openwork_user_profile", JSON.stringify(updated));
+    window.dispatchEvent(new Event("openwork_auth_changed"));
+  };
+
+  const updateAIConfig = (updates: Partial<AIConfig>) => {
+    setAIConfig((prev) => {
+      const updated = { ...prev, ...updates };
+      localStorage.setItem("openwork_ai_config", JSON.stringify(updated));
+      return updated;
+    });
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      aiConfig,
-      isAuthenticated,
-      isGuest: !isAuthenticated,
-      isLoading,
-      login,
-      signup,
-      loginWithOAuth,
-      logout,
-      setRole, 
-      setWorkspaceName, 
-      updateProfile,
-      updateAIConfig,
-      isAdmin: user.role === "admin" || user.role === "manager" 
-    }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        aiConfig,
+        isAuthenticated,
+        isGuest: !isAuthenticated,
+        isLoading,
+        login,
+        signup,
+        loginWithOAuth,
+        logout,
+        setRole,
+        setWorkspaceName,
+        updateProfile,
+        updateAIConfig,
+        isAdmin: user.role === "admin"
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

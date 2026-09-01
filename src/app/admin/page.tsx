@@ -115,19 +115,18 @@ export default function AdminPanel() {
   const [isTestingAIChat, setIsTestingAIChat] = useState(false);
   const [aiChatResult, setAiChatResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  const testPocketBaseHealth = async () => {
+  const testCloudflareD1Health = async () => {
     setIsTestingHealth(true);
     setHealthResult(null);
     try {
-      const pbUrl = process.env.NEXT_PUBLIC_POCKETBASE_URL || "http://127.0.0.1:8090";
-      const res = await fetch(`${pbUrl}/api/health`);
+      const res = await fetch("/api/blocks?userId=health_check");
       if (res.ok) {
-        setHealthResult({ success: true, message: `PocketBase API is Healthy (HTTP 200 OK) at ${pbUrl}` });
+        setHealthResult({ success: true, message: "Cloudflare D1 Serverless Edge DB is Healthy (HTTP 200 OK)" });
       } else {
-        setHealthResult({ success: false, message: `PocketBase API returned status HTTP ${res.status}` });
+        setHealthResult({ success: false, message: `Cloudflare D1 API returned status HTTP ${res.status}` });
       }
     } catch (e: any) {
-      setHealthResult({ success: false, message: `Could not connect to PocketBase API: ${e.message}` });
+      setHealthResult({ success: false, message: `Could not connect to Cloudflare D1 API: ${e.message}` });
     } finally {
       setIsTestingHealth(false);
     }
@@ -639,19 +638,19 @@ export default function AdminPanel() {
 
           {/* Test Suite Card */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Test 1: PocketBase Health */}
+            {/* Test 1: Cloudflare D1 Health */}
             <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl space-y-3 shadow-2xs">
               <div className="flex items-center justify-between">
                 <div className="font-bold text-xs text-slate-900 dark:text-zinc-100 flex items-center gap-1.5">
                   <Building2 size={15} className="text-blue-500" />
-                  <span>PocketBase DB API</span>
+                  <span>Cloudflare D1 Edge DB</span>
                 </div>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold">
-                  SQLite Engine
+                  Edge SQL
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                Pings `/api/health` to verify database responsiveness and readiness.
+                Pings `/api/blocks` to verify serverless edge database responsiveness and D1 binding.
               </p>
 
               {healthResult && (
@@ -663,12 +662,12 @@ export default function AdminPanel() {
 
               <button
                 type="button"
-                onClick={testPocketBaseHealth}
+                onClick={testCloudflareD1Health}
                 disabled={isTestingHealth}
                 className="w-full py-2 px-3 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
               >
                 <Activity size={13} className={isTestingHealth ? "animate-spin text-blue-500" : "text-blue-500"} />
-                <span>{isTestingHealth ? "Pinging DB..." : "Test PocketBase Health"}</span>
+                <span>{isTestingHealth ? "Pinging D1..." : "Test Cloudflare D1 Health"}</span>
               </button>
             </div>
 
@@ -717,7 +716,7 @@ export default function AdminPanel() {
               <div className="p-3 bg-slate-50 dark:bg-zinc-950 rounded-lg border border-slate-200/60 dark:border-zinc-800 space-y-1">
                 <div className="text-[10px] uppercase font-bold text-slate-400">Database Binding</div>
                 <div className="font-mono text-slate-800 dark:text-zinc-200 truncate">
-                  {process.env.NEXT_PUBLIC_POCKETBASE_URL || "http://127.0.0.1:8090 (Default)"}
+                  Cloudflare D1 (openwork-db)
                 </div>
               </div>
 

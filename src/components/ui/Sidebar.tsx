@@ -161,7 +161,7 @@ export function Sidebar() {
                   fetchBlocks();
                 }}
                 className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors flex-shrink-0"
-                title="Sign Out of PocketBase"
+                title="Sign Out"
               >
                 <LogOut size={13} />
               </button>

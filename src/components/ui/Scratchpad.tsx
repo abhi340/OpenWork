@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
-import { pb } from "@/lib/pocketbase";
 import { Check, Cloud, FileEdit, Loader2 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
@@ -29,36 +28,23 @@ export function Scratchpad({ activeBlockId }: { activeBlockId: string | null }) 
   const editorInstanceRef = useRef<any>(null);
 
   // Load document for active block or global scratchpad
-  const loadDocument = useCallback(async () => {
+  const loadDocument = useCallback(() => {
     try {
-      const filter = activeBlockId
-        ? `block_id = "${activeBlockId}"`
-        : `block_id = "" || block_id = null`;
-      const docs = await pb.collection("documents").getList(1, 1, {
-        filter,
-        sort: "-updated",
-        requestKey: null
-      });
-
-      if (docs.items.length > 0) {
-        const item = docs.items[0];
-        setDocId(item.id);
-        if (item.content && Array.isArray(item.content) && item.content.length > 0) {
-          setInitialContent(item.content);
+      const storageKey = activeBlockId ? `openwork_scratchpad_${activeBlockId}` : "openwork_scratchpad_global";
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setInitialContent(parsed);
           if (editorInstanceRef.current) {
-            editorInstanceRef.current.replaceBlocks(editorInstanceRef.current.document, item.content);
+            editorInstanceRef.current.replaceBlocks(editorInstanceRef.current.document, parsed);
           }
-        } else {
-          setInitialContent([]);
+          return;
         }
-      } else {
-        setDocId(null);
-        setInitialContent([]);
       }
+      setInitialContent([]);
     } catch (err: any) {
-      if (!err?.isAbort) {
-        console.error("Error loading document:", err);
-      }
+      console.error("Error loading scratchpad:", err);
     }
   }, [activeBlockId]);
 
@@ -75,32 +61,16 @@ export function Scratchpad({ activeBlockId }: { activeBlockId: string | null }) 
     setSaveStatus("saving");
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
 
-    saveTimeoutRef.current = setTimeout(async () => {
+    saveTimeoutRef.current = setTimeout(() => {
       try {
-        const blockIdVal = activeBlockId || "";
-        const currentDocId = docIdRef.current;
-
-        if (currentDocId) {
-          await pb.collection("documents").update(currentDocId, {
-            content,
-            block_id: blockIdVal
-          }, { requestKey: null });
-        } else {
-          const created = await pb.collection("documents").create({
-            title: activeBlockId ? `Notes for Block ${activeBlockId}` : "Global Scratchpad",
-            block_id: blockIdVal,
-            content
-          }, { requestKey: null });
-          setDocId(created.id);
-        }
+        const storageKey = activeBlockId ? `openwork_scratchpad_${activeBlockId}` : "openwork_scratchpad_global";
+        localStorage.setItem(storageKey, JSON.stringify(content));
         setSaveStatus("saved");
       } catch (err: any) {
-        if (!err?.isAbort) {
-          console.error("Error saving document:", err);
-        }
+        console.error("Error saving scratchpad:", err);
         setSaveStatus("saved");
       }
-    }, 800);
+    }, 600);
   };
 
   return (

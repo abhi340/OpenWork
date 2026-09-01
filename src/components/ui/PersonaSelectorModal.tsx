@@ -201,7 +201,7 @@ const PERSONA_BLUEPRINTS: PersonaBlueprint[] = [
         title: "Assigned Daily Tickets",
         type: "counter_batch",
         config: { count: 0, target: 4 },
-        items: ["Setup local PocketBase dev environment", "Complete onboarding documentation"]
+        items: ["Setup local Cloudflare D1 dev environment", "Complete onboarding documentation"]
       },
       {
         title: "Learning & Code Study (30 min)",

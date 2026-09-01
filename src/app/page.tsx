@@ -11,7 +11,6 @@ import { CommandPalette } from "@/components/ui/CommandPalette";
 import { ZenFocusMode } from "@/components/ui/ZenFocusMode";
 import { AccomplishmentPortfolioModal } from "@/components/ui/AccomplishmentPortfolioModal";
 import { MorningTriageModal } from "@/components/ui/MorningTriageModal";
-import { pb } from "@/lib/pocketbase";
 import { 
   BookmarkPlus, 
   Check,
@@ -139,22 +138,24 @@ export default function Dashboard() {
 
     try {
       setIsSavingRoutine(true);
-      await pb.collection("routine_templates").create({
-        title: name,
-        structure: blocks.map((b) => ({
-          title: b.title,
-          type: b.type,
-          config: b.config,
-          items: b.items,
-          order_index: b.order_index
-        }))
-      }, { requestKey: null });
+      await fetch("/api/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name,
+          blocks: blocks.map((b) => ({
+            title: b.title,
+            type: b.type,
+            config: b.config,
+            items: b.items,
+            order_index: b.order_index
+          }))
+        })
+      });
       setRoutineSavedName(name);
       setTimeout(() => setRoutineSavedName(null), 3000);
     } catch (err: any) {
-      if (!err?.isAbort) {
-        console.error("Error saving routine:", err);
-      }
+      console.error("Error saving routine:", err);
     } finally {
       setIsSavingRoutine(false);
     }
