@@ -71,6 +71,26 @@ export default function EmployeeSettingsPage() {
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const avatarFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAvatarFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      alert("Please select a valid image file (PNG, JPG, WebP, SVG, etc.).");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      if (result) {
+        setAvatarUrl(result);
+        updateProfile({ avatarUrl: result });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Auto-fetch available models from provider API
   const fetchAvailableModels = async () => {
@@ -498,6 +518,24 @@ export default function EmployeeSettingsPage() {
                     <img src={preset} alt={`Preset ${idx + 1}`} className="w-full h-full object-cover" />
                   </button>
                 ))}
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap pt-1">
+                <button
+                  type="button"
+                  onClick={() => avatarFileInputRef.current?.click()}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 hover:border-blue-500 flex items-center gap-1.5 text-xs font-semibold shadow-2xs transition-all"
+                >
+                  <Upload size={13} className="text-blue-500" />
+                  <span>Upload Local Photo</span>
+                </button>
+                <input
+                  type="file"
+                  ref={avatarFileInputRef}
+                  onChange={handleAvatarFileUpload}
+                  accept="image/*"
+                  className="hidden"
+                />
               </div>
 
               <input

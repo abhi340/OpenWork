@@ -48,7 +48,7 @@ interface Message {
 
 export function FloatingAICopilot() {
   const { aiConfig } = useAuth();
-  const { blocks, addBlock } = useWorkspaceStore();
+  const { blocks, addBlock, removeBlock, clearAllBlocks } = useWorkspaceStore();
   
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -56,16 +56,38 @@ export function FloatingAICopilot() {
   const [isLoading, setIsLoading] = useState(false);
   const [appliedProposalId, setAppliedProposalId] = useState<string | null>(null);
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "welcome",
-      role: "assistant",
-      content: "👋 Hi! I'm your private OpenWork Copilot.\n\nI have **full authority** to build, configure, and customize widgets directly on your dashboard. Tell me what workflow you want (*e.g. 'Build a cold call tracker', 'Add a daily revenue KPI', 'Create a bug triage pipeline'*) and I'll construct it for you in 1 click."
-    }
-  ]);
+  const defaultWelcomeMessage: Message = {
+    id: "welcome",
+    role: "assistant",
+    content: "👋 Hi! I'm your private OpenWork Copilot.\n\nI have **full authority** to build, configure, customize, and remove widgets directly on your dashboard. Tell me what workflow you want (*e.g. 'Build a cold call tracker', 'Add a daily revenue KPI', 'Remove Execution Stages', 'Delete all blocks on Sep 2'*) and I'll execute it for you in 1 click."
+  };
+
+  const [messages, setMessages] = useState<Message[]>([defaultWelcomeMessage]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 1. Restore Chat History across page refreshes
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("openwork_copilot_chat_history");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+        }
+      }
+    } catch (e) {}
+  }, []);
+
+  // 2. Persist Chat History on change
+  useEffect(() => {
+    if (messages.length > 0) {
+      try {
+        localStorage.setItem("openwork_copilot_chat_history", JSON.stringify(messages));
+      } catch (e) {}
+    }
+  }, [messages]);
 
   useEffect(() => {
     if (isOpen) {
@@ -73,6 +95,13 @@ export function FloatingAICopilot() {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [isOpen, messages]);
+
+  const clearChat = () => {
+    setMessages([defaultWelcomeMessage]);
+    try {
+      localStorage.removeItem("openwork_copilot_chat_history");
+    } catch (e) {}
+  };
 
   const handleSend = async (userPrompt?: string) => {
     const textToSend = userPrompt || input.trim();
@@ -89,6 +118,72 @@ export function FloatingAICopilot() {
     setInput("");
     setIsLoading(true);
 
+    const cleanLower = textToSend.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim();
+
+    // 1. Instant Action: Casual Greetings & Check-in
+    if (["hi", "hgi", "hello", "hey", "hey there", "hola", "yo", "good morning", "good afternoon", "good evening", "what can you do", "help"].includes(cleanLower)) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: "👋 Hey! I'm ready to help you organize and drive today's work.\n\nTell me what you're working on (*e.g., 'Draft founder story at 6pm', 'Add 50 cold calls goal', 'Bug triage sprint'*) or ask me to modify your board, and I'll construct it immediately."
+        }
+      ]);
+      setIsLoading(false);
+      return;
+    }
+
+    // 2. Direct Clear Board command
+    if (
+      cleanLower === "clear the dashboard" ||
+      cleanLower === "clear dashboard" ||
+      cleanLower === "clear the board" ||
+      cleanLower === "clear board" ||
+      cleanLower === "reset the board" ||
+      cleanLower === "reset board" ||
+      cleanLower === "delete all blocks" ||
+      cleanLower === "delete all widgets"
+    ) {
+      await clearAllBlocks();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: "✨ Your execution board has been completely cleared."
+        }
+      ]);
+      setIsLoading(false);
+      return;
+    }
+
+    // 3. Direct Specific Widget Removal command
+    const removeKeywords = ["remove ", "delete ", "drop ", "destroy "];
+    const matchKeyword = removeKeywords.find((kw) => cleanLower.startsWith(kw));
+    if (matchKeyword) {
+      const targetQuery = cleanLower.slice(matchKeyword.length).trim();
+      const found = blocks.find((b) => 
+        b.id.toLowerCase() === targetQuery || 
+        b.title.toLowerCase().includes(targetQuery) ||
+        b.type.toLowerCase().includes(targetQuery)
+      );
+
+      if (found) {
+        await removeBlock(found.id);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: `🗑️ Removed "${found.title}" from your board.`
+          }
+        ]);
+        setIsLoading(false);
+        return;
+      }
+    }
+
     // Read latest config from store or localStorage fallback
     let activeConfig: AIConfig = aiConfig;
     try {
@@ -99,53 +194,50 @@ export function FloatingAICopilot() {
     } catch (e) {}
 
     // Build context from active board blocks
-    const boardContext = blocks.map((b) => {
-      if (b.type === "counter_batch") {
-        return `[Counter: "${b.title}"] (${b.config?.count || 0}/${b.config?.target || 5} ${b.config?.unit || "tasks"})`;
-      }
-      if (b.type === "checklist") {
-        const items = b.items || [];
-        return `[Checklist: "${b.title}"] (${items.filter((i: any) => i.completed).length}/${items.length} completed)`;
-      }
-      if (b.type === "timer_task") {
-        return `[Focus Timer: "${b.title}"] (${Math.round((b.config?.timeRemaining || 1500) / 60)}m)`;
-      }
-      if (b.type === "metric_kpi") {
-        return `[KPI Goal: "${b.title}"] (${b.config?.prefix || ""}${b.config?.current || 0}/${b.config?.target || 100} ${b.config?.unit || ""})`;
-      }
-      if (b.type === "link_hub") {
-        return `[Link Dock: "${b.title}"] (${(b.items || []).length} bookmarks)`;
-      }
-      return `[Block: "${b.title}" (${b.type})]`;
-    }).join("\n");
+    const boardContext = blocks.length > 0 
+      ? blocks.map((b) => {
+          const dateTag = b.config?.date ? ` | Date: "${b.config.date}"` : " | Date: All";
+          return `- ID: "${b.id}" | Title: "${b.title}" | Type: "${b.type}"${dateTag}`;
+        }).join("\n")
+      : "Board is currently empty.";
 
-    const systemPrompt = `You are OpenWork Copilot — an intelligent, friendly executive AI assistant and dashboard architect.
+    const systemPrompt = `You are OpenWork Copilot — an elite, execution-focused executive AI Chief of Staff and dashboard architect.
 
-CAPABILITIES:
-1. General Intelligence & Assistant: You can answer any general question, offer advice, explain concepts, brainstorm ideas, write content, and converse warmly on any topic (science, productivity, philosophy, general knowledge, business, coding, etc.).
-2. Dashboard Builder: You have FULL AUTHORITY to build, configure, and generate custom widgets on the user's dashboard whenever requested.
+CORE MISSION & BEHAVIOR:
+You have FULL AUTHORITY to create, configure, and remove widgets on the user's dashboard.
+1. When user sends a greeting (e.g. "hi", "hey"), greet them warmly and ask what tasks or goals they are tackling. DO NOT say "No changes detected" or regurgitate system messages.
+2. When the user shares plans, ideas, schedules, or tasks (e.g., "post founder story at 6pm today", "cold outreach goal 50 calls", "bug sprint on Friday"), construct high-impact widgets enclosed in <<<BLOCKS: [...]>>> tags.
+3. When removing a specific widget, output: <<<ACTION: REMOVE_BLOCK, "block id or title">>>
+4. When removing all widgets for a specific date, output: <<<ACTION: REMOVE_DATE, "YYYY-MM-DD">>>
+5. When clearing the entire board, output: <<<ACTION: CLEAR_BOARD>>>
+6. DO NOT preach, lecture, give unsolicited life advice, or write long conversational paragraphs.
 
 Current Board State:
-${boardContext || "Board is currently empty."}
+${boardContext}
 
 AVAILABLE WIDGET ENGINES:
-1. "counter_batch" (config: { target: number, unit: string, count: 0 }, items: string[])
-2. "timer_task" (config: { initialDuration: seconds, timeRemaining: seconds, isRunning: false })
-3. "checklist" (items: [{ id: "1", text: "...", completed: false }])
-4. "table" (config: { columns: ["Col1", "Col2", "Col3"] })
-5. "pipeline_flow" (config: { stages: ["Stage 1", "Stage 2", "Stage 3"] })
-6. "metric_kpi" (config: { target: number, current: 0, prefix: "$", unit: "USD", step: 1 })
-7. "link_hub" (items: [{ id: "1", title: "Tool Name", url: "https://..." }])
+1. "checklist" (items: [{ id: "1", text: "Imperative task description", completed: false }])
+2. "scheduled" (config: { date: "YYYY-MM-DD", time: "HH:MM", description: "Milestone name" }, items: ["Task 1", "Task 2"])
+3. "counter_batch" (config: { target: number, unit: string, count: 0 }, items: string[])
+4. "timer_task" (config: { initialDuration: seconds, timeRemaining: seconds, isRunning: false })
+5. "metric_kpi" (config: { target: number, current: 0, prefix: "$", unit: "USD", step: 1 })
+6. "table" (config: { columns: ["Col1", "Col2", "Col3"] })
+7. "pipeline_flow" (config: { stages: ["Stage 1", "Stage 2", "Stage 3"] })
+8. "link_hub" (items: [{ id: "1", title: "Tool Name", url: "https://..." }])
 
-CRITICAL RULES:
-- When asked to build, create, or modify widgets/dashboards, ALWAYS provide a friendly explanation AND append the JSON payload enclosed in <<<BLOCKS: [...]>>> tags.
-- ALWAYS format the payload as an ARRAY of widget objects, even if generating only 1 widget! Each object MUST have a "type" field (e.g., "counter_batch", "timer_task", "checklist", "table", "pipeline_flow", "metric_kpi", "link_hub").
-- When asked general questions (e.g., general knowledge, philosophy, riddles, science, advice), answer naturally, warmly, and accurately. Do NOT refuse general questions.
+ACTIONS & BOARD CONTROL:
+- Clear entire board: <<<ACTION: CLEAR_BOARD>>>
+- Remove specific widget: <<<ACTION: REMOVE_BLOCK, "exact block id or title">>>
+- Remove widgets on specific date: <<<ACTION: REMOVE_DATE, "YYYY-MM-DD">>>
 
-Payload Example:
-<<<BLOCKS: [
-  {"type": "counter_batch", "title": "PropTech Job Uploads", "config": {"count": 0, "target": 10, "unit": "jobs"}}
-]>>>`;
+TASK FORMULATION RULES:
+- Convert casual, shorthand notes into clear, professional, imperative action items (e.g., "post founder story at 6 pm" -> "Draft & publish Founder Story by 6:00 PM today").
+- If the user mentions working today and taking a break until a future date (e.g., "work is only for today and on 10 sep"), DO NOT create literal vague items like "Work only for today". Instead, formulate actionable milestones.
+
+RESPONSE FORMAT:
+- If greeting: 1-2 friendly, proactive sentences.
+- If creating widgets: 1 punchy sentence acknowledging the workspace update, followed immediately by <<<BLOCKS: [...]>>> payload.
+- If modifying/deleting: 1 sentence confirmation followed by <<<ACTION: ...>>> tag.`;
 
     try {
       const res = await fetch("/api/ai/chat", {
@@ -180,6 +272,37 @@ Payload Example:
         let suggestedBlocks: GeneratedBlock[] | undefined;
         let cleanContent = rawReply;
 
+        // Action Command: CLEAR_BOARD
+        if (rawReply.includes("<<<ACTION: CLEAR_BOARD>>>") || rawReply.includes("<<<ACTION:CLEAR_BOARD>>>") || rawReply.includes("<<<BLOCKS: []>>>")) {
+          await clearAllBlocks();
+          cleanContent = rawReply
+            .replace(/<<<ACTION:[\s\S]*?>>>/, "")
+            .replace(/<<<BLOCKS:[\s\S]*?>>>/, "")
+            .trim() || "✨ Your execution board has been completely cleared.";
+        }
+
+        // Action Command: REMOVE_BLOCK
+        const removeBlockMatch = rawReply.match(/<<<ACTION:\s*REMOVE_BLOCK\s*,\s*["']?([^"'>]+)["']?\s*>>>/i);
+        if (removeBlockMatch) {
+          const target = removeBlockMatch[1].trim().toLowerCase();
+          const found = blocks.find((b) => b.id.toLowerCase() === target || b.title.toLowerCase().includes(target) || b.type.toLowerCase().includes(target));
+          if (found) {
+            await removeBlock(found.id);
+            cleanContent = rawReply.replace(/<<<ACTION:[\s\S]*?>>>/, "").trim() || `🗑️ Removed "${found.title}" from your board.`;
+          }
+        }
+
+        // Action Command: REMOVE_DATE
+        const removeDateMatch = rawReply.match(/<<<ACTION:\s*REMOVE_DATE\s*,\s*["']?([^"'>]+)["']?\s*>>>/i);
+        if (removeDateMatch) {
+          const targetDate = removeDateMatch[1].trim();
+          const matching = blocks.filter((b) => b.config?.date === targetDate);
+          for (const b of matching) {
+            await removeBlock(b.id);
+          }
+          cleanContent = rawReply.replace(/<<<ACTION:[\s\S]*?>>>/, "").trim() || `🗑️ Removed ${matching.length} widgets scheduled for ${targetDate}.`;
+        }
+
         // 1. Primary parser: <<<BLOCKS: [...]>>>
         const blocksMatch = rawReply.match(/<<<BLOCKS:([\s\S]*?)>>>/);
         if (blocksMatch) {
@@ -211,13 +334,19 @@ Payload Example:
           }
         }
 
-        // Fallback: Check if reply contains task list lines for simple checklist conversion
-        const lines = cleanContent
-          .split("\n")
-          .map((l: string) => l.trim().replace(/^[-*•\d+.]\s*/, ""))
-          .filter((l: string) => l.length > 5 && !l.toLowerCase().includes("here is") && !l.toLowerCase().includes("tasks:"));
+        // Strict Task List Fallback: ONLY extract if lines are explicitly bulleted items and not conversational sentences
+        const rawLines = cleanContent.split("\n").map((l: string) => l.trim());
+        const taskBulletLines = rawLines
+          .filter((l: string) => /^[-*•\d+.]\s+/.test(l) || /^\[\s*\]\s+/.test(l))
+          .map((l: string) => l.replace(/^[-*•\d+.]\s+/, "").replace(/^\[\s*\]\s+/, "").trim())
+          .filter((l: string) => 
+            l.length >= 4 && 
+            l.length <= 100 && 
+            !l.endsWith("?") &&
+            !/^(it sounds|to confirm|also|why not|would you|here is|i'd like|sorry|sure)/i.test(l)
+          );
 
-        const suggestedTasks = !suggestedBlocks && lines.length >= 2 && lines.length <= 8 ? lines : undefined;
+        const suggestedTasks = !suggestedBlocks && taskBulletLines.length >= 2 && taskBulletLines.length <= 8 ? taskBulletLines : undefined;
 
         setMessages((prev) => [
           ...prev,
@@ -287,6 +416,11 @@ Payload Example:
       ];
     }
 
+    // Ensure daily scoped widgets receive active date stamping if not specified
+    if (!config.date && ["checklist", "counter_batch", "timer_task"].includes(b.type)) {
+      config.date = new Date().toISOString().split("T")[0];
+    }
+
     return {
       title: b.title || "Custom Block",
       type: b.type || "checklist",
@@ -329,15 +463,6 @@ Payload Example:
     });
   };
 
-  const clearChat = () => {
-    setMessages([
-      {
-        id: "welcome",
-        role: "assistant",
-        content: "Chat cleared! How can I help you construct or customize widgets next?"
-      }
-    ]);
-  };
 
   return (
     <aside aria-label="AI Copilot Assistant">
@@ -456,30 +581,33 @@ Payload Example:
                   msg.role === "user" ? "items-end" : "items-start"
                 }`}
               >
-                <div
-                  className={`max-w-[90%] p-3 rounded-2xl text-xs leading-relaxed ${
-                    msg.role === "user"
-                      ? "bg-blue-600 text-white rounded-br-xs font-medium"
-                      : msg.isError
-                      ? "bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 rounded-bl-xs border border-red-200 dark:border-red-900/60"
-                      : "bg-slate-100 dark:bg-zinc-800/80 text-slate-800 dark:text-zinc-200 rounded-bl-xs border border-slate-200/60 dark:border-zinc-700/60"
-                  }`}
-                >
-                  <MarkdownRenderer content={msg.content} />
+                {/* Message Bubble (Only render if there is text content or error) */}
+                {(msg.content?.trim() || msg.isError) && (
+                  <div
+                    className={`max-w-[90%] p-3 rounded-2xl text-xs leading-relaxed ${
+                      msg.role === "user"
+                        ? "bg-blue-600 text-white rounded-br-xs font-medium shadow-xs"
+                        : msg.isError
+                        ? "bg-red-50 dark:bg-red-950/50 text-red-700 dark:text-red-300 rounded-bl-xs border border-red-200 dark:border-red-900/60"
+                        : "bg-slate-100 dark:bg-zinc-800/80 text-slate-800 dark:text-zinc-200 rounded-bl-xs border border-slate-200/60 dark:border-zinc-700/60"
+                    }`}
+                  >
+                    <MarkdownRenderer content={msg.content} isUser={msg.role === "user"} />
 
-                  {msg.isError && (
-                    <div className="mt-2 pt-2 border-t border-red-200/60 dark:border-red-900/60">
-                      <Link
-                        href="/settings"
-                        onClick={() => setIsOpen(false)}
-                        className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:underline flex items-center gap-1"
-                      >
-                        <Settings size={12} />
-                        <span>Select Installed Model in Settings →</span>
-                      </Link>
-                    </div>
-                  )}
-                </div>
+                    {msg.isError && (
+                      <div className="mt-2 pt-2 border-t border-red-200/60 dark:border-red-900/60">
+                        <Link
+                          href="/settings"
+                          onClick={() => setIsOpen(false)}
+                          className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:underline flex items-center gap-1"
+                        >
+                          <Settings size={12} />
+                          <span>Select Installed Model in Settings →</span>
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* ⚡ Interactive Dashboard Proposal Cards */}
                 {msg.suggestedBlocks && msg.suggestedBlocks.length > 0 && (

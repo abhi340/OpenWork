@@ -9,26 +9,32 @@ interface PriorityItem {
   completed: boolean;
 }
 
-export function TopThreePriorities() {
-  const [priorities, setPriorities] = useState<PriorityItem[]>([
+export function TopThreePriorities({ selectedDate = new Date() }: { selectedDate?: Date }) {
+  const dateKey = selectedDate.toISOString().split("T")[0];
+
+  const defaultItems: PriorityItem[] = [
     { id: "1", text: "Close key customer / executive partnership", completed: false },
     { id: "2", text: "Review and unblock team PRs & milestones", completed: false },
     { id: "3", text: "Ship core feature release & verify metrics", completed: false }
-  ]);
+  ];
+
+  const [priorities, setPriorities] = useState<PriorityItem[]>(defaultItems);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem("openwork_top_priorities");
+    const saved = localStorage.getItem(`openwork_top_priorities_${dateKey}`);
     if (saved) {
       try {
         setPriorities(JSON.parse(saved));
       } catch (e) {}
+    } else {
+      setPriorities(defaultItems);
     }
-  }, []);
+  }, [dateKey]);
 
   const savePriorities = (updated: PriorityItem[]) => {
     setPriorities(updated);
-    localStorage.setItem("openwork_top_priorities", JSON.stringify(updated));
+    localStorage.setItem(`openwork_top_priorities_${dateKey}`, JSON.stringify(updated));
   };
 
   const toggleComplete = (id: string) => {

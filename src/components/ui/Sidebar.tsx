@@ -19,6 +19,7 @@ import {
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { calculateBoardProgress } from "@/lib/progress";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -26,9 +27,7 @@ export function Sidebar() {
   const { user, isAuthenticated, logout } = useAuth();
   const { blocks, fetchBlocks } = useWorkspaceStore();
 
-  const completedBatches = blocks.filter(
-    (b) => b.type === "counter_batch" && (b.config?.count || 0) >= (b.config?.target || 5)
-  ).length;
+  const progress = calculateBoardProgress(blocks);
 
   const todayStr = new Date().toLocaleDateString("en-US", {
     weekday: "short",
@@ -103,27 +102,24 @@ export function Sidebar() {
 
       {/* Bottom Footer Section */}
       <div className="p-3 border-t border-slate-200 dark:border-zinc-800/80 space-y-2.5">
-        {/* Quick Batch Goal Progress */}
-        <div className="px-3 py-2 rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800/80 shadow-2xs">
-          <div className="flex items-center justify-between text-xs mb-1.5 font-medium">
-            <span className="text-slate-600 dark:text-zinc-400 flex items-center gap-1">
-              <CheckCircle2 size={13} className="text-emerald-500" />
-              Completed
+        {/* Universal Workspace Progress */}
+        <div className="px-3 py-2.5 rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800/80 shadow-2xs space-y-1.5">
+          <div className="flex items-center justify-between text-xs font-medium">
+            <span className="text-slate-600 dark:text-zinc-400 flex items-center gap-1.5 font-semibold">
+              <CheckCircle2 size={13} className="text-emerald-500 flex-shrink-0" />
+              <span>Completed</span>
             </span>
-            <span className="text-slate-900 dark:text-zinc-200 font-semibold font-mono">
-              {completedBatches}/{blocks.filter((b) => b.type === "counter_batch").length || 0}
+            <span className="text-slate-900 dark:text-zinc-100 font-bold font-mono text-xs">
+              {progress.completedUnits}/{progress.totalUnits}
+              <span className="text-[10px] text-slate-400 dark:text-zinc-500 font-normal ml-1">
+                ({progress.percentage}%)
+              </span>
             </span>
           </div>
           <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
             <div 
-              className="bg-emerald-500 h-full rounded-full transition-all duration-300"
-              style={{
-                width: `${
-                  blocks.filter((b) => b.type === "counter_batch").length > 0
-                    ? Math.min(100, (completedBatches / blocks.filter((b) => b.type === "counter_batch").length) * 100)
-                    : 0
-                }%`
-              }}
+              className="bg-emerald-500 h-full rounded-full transition-all duration-300 shadow-2xs"
+              style={{ width: `${progress.percentage}%` }}
             />
           </div>
         </div>

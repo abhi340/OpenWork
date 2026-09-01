@@ -22,6 +22,7 @@ import {
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@/context/AuthContext";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { calculateBoardProgress } from "@/lib/progress";
 import { Scratchpad } from "./Scratchpad";
 
 export function MobileNavbar() {
@@ -33,9 +34,7 @@ export function MobileNavbar() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isNotesSheetOpen, setIsNotesSheetOpen] = useState(false);
 
-  const completedBatches = blocks.filter(
-    (b) => b.type === "counter_batch" && (b.config?.count || 0) >= (b.config?.target || 5)
-  ).length;
+  const progress = calculateBoardProgress(blocks);
 
   return (
     <>
@@ -148,26 +147,23 @@ export function MobileNavbar() {
             {/* Bottom Section */}
             <div className="pt-4 border-t border-slate-200 dark:border-zinc-800 space-y-3">
               {/* Completed Gauge */}
-              <div className="p-3 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800">
-                <div className="flex items-center justify-between text-xs mb-1 font-medium text-slate-700 dark:text-zinc-300">
-                  <span className="flex items-center gap-1">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-1.5">
+                <div className="flex items-center justify-between text-xs font-medium text-slate-700 dark:text-zinc-300">
+                  <span className="flex items-center gap-1.5 font-semibold">
                     <CheckCircle2 size={13} className="text-emerald-500" />
-                    Completed Today
+                    <span>Completed Today</span>
                   </span>
-                  <span className="font-mono font-bold">
-                    {completedBatches}/{blocks.filter((b) => b.type === "counter_batch").length || 0}
+                  <span className="font-mono font-bold text-xs">
+                    {progress.completedUnits}/{progress.totalUnits}
+                    <span className="text-[10px] text-slate-400 dark:text-zinc-500 font-normal ml-1">
+                      ({progress.percentage}%)
+                    </span>
                   </span>
                 </div>
                 <div className="w-full bg-slate-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
                   <div 
-                    className="bg-emerald-500 h-full rounded-full transition-all"
-                    style={{
-                      width: `${
-                        blocks.filter((b) => b.type === "counter_batch").length > 0
-                          ? Math.min(100, (completedBatches / blocks.filter((b) => b.type === "counter_batch").length) * 100)
-                          : 0
-                      }%`
-                    }}
+                    className="bg-emerald-500 h-full rounded-full transition-all duration-300 shadow-2xs"
+                    style={{ width: `${progress.percentage}%` }}
                   />
                 </div>
               </div>

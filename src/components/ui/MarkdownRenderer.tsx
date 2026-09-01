@@ -3,8 +3,14 @@
 import React from "react";
 import { CheckCircle2, Circle } from "lucide-react";
 
-export function MarkdownRenderer({ content }: { content: string }) {
-  if (!content) return null;
+export function MarkdownRenderer({ 
+  content, 
+  isUser = false 
+}: { 
+  content: string; 
+  isUser?: boolean; 
+}) {
+  if (!content || !content.trim()) return null;
 
   // Split lines
   const lines = content.split("\n");
@@ -14,12 +20,12 @@ export function MarkdownRenderer({ content }: { content: string }) {
 
     // Empty line
     if (!trimmed) {
-      return <div key={index} className="h-2" />;
+      return <div key={index} className="h-1.5" />;
     }
 
     // Horizontal Rule (---, ***, ___)
     if (/^[-*_]{3,}\s*$/.test(trimmed)) {
-      return <hr key={index} className="my-3 border-slate-200 dark:border-zinc-800" />;
+      return <hr key={index} className={`my-2.5 ${isUser ? "border-blue-400/40" : "border-slate-200 dark:border-zinc-800"}`} />;
     }
 
     // Checkbox items (- [x] or - [ ])
@@ -29,16 +35,16 @@ export function MarkdownRenderer({ content }: { content: string }) {
       const isChecked = checkboxMatch[2].toLowerCase() === "x";
       const itemText = checkboxMatch[3];
       return (
-        <div key={index} className={`flex items-start gap-2 ${isNested ? "my-0.5 ml-5" : "my-1 ml-1"} text-slate-800 dark:text-zinc-200`}>
+        <div key={index} className={`flex items-start gap-2 ${isNested ? "my-0.5 ml-4" : "my-1 ml-1"} ${isUser ? "text-white" : "text-slate-800 dark:text-zinc-200"}`}>
           <div className="mt-0.5 flex-shrink-0">
             {isChecked ? (
-              <CheckCircle2 size={14} className="text-emerald-500" />
+              <CheckCircle2 size={14} className={isUser ? "text-white" : "text-emerald-500"} />
             ) : (
-              <Circle size={14} className="text-slate-400 dark:text-zinc-600" />
+              <Circle size={14} className={isUser ? "text-blue-200" : "text-slate-400 dark:text-zinc-600"} />
             )}
           </div>
-          <span className={`text-xs ${isChecked ? "text-slate-700 dark:text-zinc-300 font-medium" : "text-slate-600 dark:text-zinc-400"}`}>
-            {formatInline(itemText)}
+          <span className={`text-xs ${isChecked ? (isUser ? "text-white/90 font-medium" : "text-slate-700 dark:text-zinc-300 font-medium") : (isUser ? "text-white/80" : "text-slate-600 dark:text-zinc-400")}`}>
+            {formatInline(itemText, isUser)}
           </span>
         </div>
       );
@@ -48,8 +54,8 @@ export function MarkdownRenderer({ content }: { content: string }) {
     if (/^#{4,6}\s+/.test(line)) {
       const text = line.replace(/^#{4,6}\s+/, "");
       return (
-        <h5 key={index} className="font-bold text-xs text-slate-800 dark:text-zinc-200 mt-3 mb-1">
-          {formatInline(text)}
+        <h5 key={index} className={`font-bold text-xs ${isUser ? "text-white" : "text-slate-800 dark:text-zinc-200"} mt-2.5 mb-1`}>
+          {formatInline(text, isUser)}
         </h5>
       );
     }
@@ -57,8 +63,8 @@ export function MarkdownRenderer({ content }: { content: string }) {
     // Header ###
     if (line.startsWith("### ")) {
       return (
-        <h4 key={index} className="font-bold text-sm text-slate-900 dark:text-zinc-100 mt-3 mb-1.5 flex items-center gap-1.5">
-          {formatInline(line.replace(/^###\s+/, ""))}
+        <h4 key={index} className={`font-bold text-sm ${isUser ? "text-white" : "text-slate-900 dark:text-zinc-100"} mt-2.5 mb-1 flex items-center gap-1.5`}>
+          {formatInline(line.replace(/^###\s+/, ""), isUser)}
         </h4>
       );
     }
@@ -66,8 +72,8 @@ export function MarkdownRenderer({ content }: { content: string }) {
     // Header ##
     if (line.startsWith("## ")) {
       return (
-        <h3 key={index} className="font-extrabold text-sm text-slate-900 dark:text-zinc-50 mt-4 mb-2 pb-1 border-b border-slate-100 dark:border-zinc-800/80">
-          {formatInline(line.replace(/^##\s+/, ""))}
+        <h3 key={index} className={`font-bold text-sm ${isUser ? "text-white" : "text-slate-900 dark:text-zinc-100"} mt-2 mb-1`}>
+          {formatInline(line.replace(/^##\s+/, ""), isUser)}
         </h3>
       );
     }
@@ -75,8 +81,8 @@ export function MarkdownRenderer({ content }: { content: string }) {
     // Header #
     if (line.startsWith("# ")) {
       return (
-        <h2 key={index} className="font-black text-base text-slate-900 dark:text-zinc-50 mt-2 mb-2">
-          {formatInline(line.replace(/^#\s+/, ""))}
+        <h2 key={index} className={`font-black text-base ${isUser ? "text-white" : "text-slate-900 dark:text-zinc-50"} mt-1.5 mb-1.5`}>
+          {formatInline(line.replace(/^#\s+/, ""), isUser)}
         </h2>
       );
     }
@@ -87,10 +93,10 @@ export function MarkdownRenderer({ content }: { content: string }) {
       const isNested = bulletMatch[1].length > 0;
       const text = bulletMatch[2];
       return (
-        <div key={index} className={`flex items-start gap-2 ${isNested ? "ml-5 my-0.5" : "ml-1.5 my-1"} text-slate-700 dark:text-zinc-300`}>
-          <span className={`rounded-full mt-1.5 flex-shrink-0 ${isNested ? "w-1 h-1 bg-slate-400 dark:bg-zinc-500" : "w-1.5 h-1.5 bg-blue-500"}`} />
-          <span className={`flex-1 ${isNested ? "text-[11px] text-slate-600 dark:text-zinc-400" : "text-xs"} leading-relaxed`}>
-            {formatInline(text)}
+        <div key={index} className={`flex items-start gap-2 ${isNested ? "ml-4 my-0.5" : "ml-1 my-1"} ${isUser ? "text-white" : "text-slate-700 dark:text-zinc-300"}`}>
+          <span className={`rounded-full mt-1.5 flex-shrink-0 ${isNested ? (isUser ? "w-1 h-1 bg-white/70" : "w-1 h-1 bg-slate-400 dark:bg-zinc-500") : (isUser ? "w-1.5 h-1.5 bg-white" : "w-1.5 h-1.5 bg-blue-500")}`} />
+          <span className={`flex-1 ${isNested ? (isUser ? "text-[11px] text-white/90" : "text-[11px] text-slate-600 dark:text-zinc-400") : "text-xs"} leading-relaxed`}>
+            {formatInline(text, isUser)}
           </span>
         </div>
       );
@@ -101,24 +107,24 @@ export function MarkdownRenderer({ content }: { content: string }) {
     if (numMatch) {
       const isNested = numMatch[1].length > 0;
       return (
-        <div key={index} className={`flex items-start gap-2 ${isNested ? "ml-5 my-0.5" : "ml-1 my-1"} text-slate-700 dark:text-zinc-300`}>
-          <span className="font-mono text-slate-400 dark:text-zinc-500 font-bold text-xs min-w-[16px]">
+        <div key={index} className={`flex items-start gap-2 ${isNested ? "ml-4 my-0.5" : "ml-1 my-1"} ${isUser ? "text-white" : "text-slate-700 dark:text-zinc-300"}`}>
+          <span className={`font-mono font-bold text-xs min-w-[16px] ${isUser ? "text-white/80" : "text-slate-400 dark:text-zinc-500"}`}>
             {numMatch[2]}.
           </span>
-          <span className="flex-1 text-xs leading-relaxed">{formatInline(numMatch[3])}</span>
+          <span className="flex-1 text-xs leading-relaxed">{formatInline(numMatch[3], isUser)}</span>
         </div>
       );
     }
 
     return (
-      <p key={index} className="my-1 text-xs text-slate-700 dark:text-zinc-300 leading-relaxed">
-        {formatInline(line)}
+      <p key={index} className={`my-0.5 text-xs leading-relaxed ${isUser ? "text-white font-medium" : "text-slate-700 dark:text-zinc-300"}`}>
+        {formatInline(line, isUser)}
       </p>
     );
   };
 
   // Helper to format bold, italic, code
-  const formatInline = (text: string) => {
+  const formatInline = (text: string, isUserMessage: boolean = false) => {
     const parts = [];
     let remaining = text;
     let keyIdx = 0;
@@ -159,19 +165,23 @@ export function MarkdownRenderer({ content }: { content: string }) {
 
       if (firstMatch.type === "code") {
         parts.push(
-          <code key={keyIdx++} className="px-1.5 py-0.5 rounded font-mono text-[11px] bg-slate-200 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 font-semibold border border-slate-300/60 dark:border-zinc-700/60">
+          <code key={keyIdx++} className={`px-1.5 py-0.5 rounded font-mono text-[11px] font-semibold border ${
+            isUserMessage 
+              ? "bg-blue-700 text-white border-blue-500/60" 
+              : "bg-slate-200 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border-slate-300/60 dark:border-zinc-700/60"
+          }`}>
             {firstMatch.content}
           </code>
         );
       } else if (firstMatch.type === "bold") {
         parts.push(
-          <strong key={keyIdx++} className="font-bold text-slate-900 dark:text-zinc-100">
+          <strong key={keyIdx++} className={`font-bold ${isUserMessage ? "text-white" : "text-slate-900 dark:text-zinc-100"}`}>
             {firstMatch.content}
           </strong>
         );
       } else if (firstMatch.type === "italic") {
         parts.push(
-          <em key={keyIdx++} className="italic text-slate-600 dark:text-zinc-400">
+          <em key={keyIdx++} className={`italic ${isUserMessage ? "text-white/90" : "text-slate-600 dark:text-zinc-400"}`}>
             {firstMatch.content}
           </em>
         );

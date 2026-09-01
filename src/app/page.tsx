@@ -304,10 +304,10 @@ export default function Dashboard() {
         </div>
 
         {/* Strategic Priorities */}
-        <TopThreePriorities />
+        <TopThreePriorities selectedDate={selectedDate} />
 
         {/* Dynamic Block Engine */}
-        <BlockEngine />
+        <BlockEngine selectedDate={selectedDate} />
       </div>
 
       {/* Right Pane: Context-Rich Scratchpad (Desktop >= 1024px) */}

@@ -1,0 +1,12 @@
+name = "openwork"
+compatibility_date = "2024-09-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "out"
+
+# Cloudflare D1 Database Binding
+[[d1_databases]]
+binding = "DB"
+database_name = "openwork-db"
+database_id = "e996055a-d2bc-4cee-b30f-705060a370e3"
+migrations_table = "d1_migrations"
+migrations_dir = "./migrations"

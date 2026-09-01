@@ -34,10 +34,20 @@ import { LinkHubBlock } from "./LinkHubBlock";
 import { DateMilestonesBlock } from "./DateMilestonesBlock";
 import { CustomBlockModal } from "./CustomBlockModal";
 
-export function BlockEngine() {
+export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date }) {
   const { blocks, addBlock, removeBlock, updateBlock, setActiveBlock, activeBlockId } = useWorkspaceStore();
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
+
+  const currentDateStr = selectedDate.toISOString().split("T")[0];
+
+  // Filter blocks for the active day (or global/persistent blocks)
+  const displayBlocks = blocks.filter((b) => {
+    if (b.config?.date && b.config.date !== "all") {
+      return b.config.date === currentDateStr;
+    }
+    return true;
+  });
 
   React.useEffect(() => {
     const handleOpenStudio = () => setIsCustomModalOpen(true);
@@ -46,6 +56,8 @@ export function BlockEngine() {
   }, []);
 
   const handleAdd = (type: BlockType) => {
+    const isDailyScoped = ["checklist", "counter_batch", "timer_task"].includes(type);
+
     addBlock({
       title: 
         type === "counter_batch" 
@@ -67,8 +79,9 @@ export function BlockEngine() {
           : "Work Scratchpad",
       type,
       order_index: blocks.length,
-      config: 
-        type === "timer_task" 
+      config: {
+        ...(isDailyScoped ? { date: currentDateStr } : {}),
+        ...(type === "timer_task" 
           ? { timeRemaining: 25 * 60, initialDuration: 25 * 60, isRunning: false } 
           : type === "counter_batch" 
           ? { count: 0, target: 5, unit: "Tasks" } 
@@ -80,7 +93,8 @@ export function BlockEngine() {
           ? { current: 0, target: 100, unit: "pts", prefix: "", step: 1 }
           : type === "link_hub"
           ? {}
-          : {},
+          : {})
+      },
       items: 
         type === "checklist"
           ? [{ id: "1", text: "First priority task", completed: false }]
@@ -93,7 +107,7 @@ export function BlockEngine() {
             ]
           : type === "date_milestones"
           ? [
-              { id: "1", title: "Submit Board Deck Review", dueDate: new Date().toISOString().split("T")[0], completed: false, priority: "high" },
+              { id: "1", title: "Submit Board Deck Review", dueDate: currentDateStr, completed: false, priority: "high" },
               { id: "2", title: "Contract Milestone Sign-off", dueDate: new Date(Date.now() + 86400000 * 2).toISOString().split("T")[0], completed: false, priority: "medium" }
             ]
           : []
@@ -178,7 +192,7 @@ export function BlockEngine() {
 
       {/* Block Cards List */}
       <div className="space-y-3.5">
-        {blocks.map((block, idx) => {
+        {displayBlocks.map((block, idx) => {
           const isActive = activeBlockId === block.id;
 
           return (
@@ -267,7 +281,7 @@ export function BlockEngine() {
                   </button>
                   <button
                     onClick={(e) => moveBlock(idx, "down", e)}
-                    disabled={idx === blocks.length - 1}
+                    disabled={idx === displayBlocks.length - 1}
                     className="p-1 text-slate-400 dark:text-zinc-500 hover:text-slate-700 dark:hover:text-zinc-200 disabled:opacity-20 transition-colors"
                     title="Move Down"
                   >
@@ -306,7 +320,7 @@ export function BlockEngine() {
           );
         })}
 
-        {blocks.length === 0 && (
+        {displayBlocks.length === 0 && (
           <div className="py-14 px-6 border border-dashed border-slate-300 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-900/40 text-center space-y-5">
             <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 mx-auto flex items-center justify-center border border-blue-200 dark:border-blue-800/60 shadow-2xs">
               <LayoutGrid size={22} />

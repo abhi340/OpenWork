@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { playGoalChime } from "@/lib/sound";
+import { calculateBoardProgress } from "@/lib/progress";
 
 interface ZenFocusModeProps {
   isOpen: boolean;
@@ -186,27 +187,28 @@ export function ZenFocusMode({ isOpen, onClose }: ZenFocusModeProps) {
 
       {/* Bottom Mini Objectives */}
       <div className="max-w-2xl mx-auto w-full">
-        {batchBlocks.length > 0 && (
-          <div className="bg-zinc-900/80 border border-zinc-800/80 rounded-2xl p-4 backdrop-blur-md">
-            <div className="flex items-center justify-between text-xs font-semibold text-zinc-400 mb-2">
-              <span className="flex items-center gap-1.5">
-                <Target size={14} className="text-purple-400" />
-                Active Batch Goal
-              </span>
-              <span className="font-mono text-zinc-200">
-                {batchBlocks[0].config?.count || 0} / {batchBlocks[0].config?.target || 5} Completed
-              </span>
+        {blocks.length > 0 && (() => {
+          const progress = calculateBoardProgress(blocks);
+          return (
+            <div className="bg-zinc-900/80 border border-zinc-800/80 rounded-2xl p-4 backdrop-blur-md">
+              <div className="flex items-center justify-between text-xs font-semibold text-zinc-400 mb-2">
+                <span className="flex items-center gap-1.5">
+                  <Target size={14} className="text-purple-400" />
+                  Workspace Goal Progress
+                </span>
+                <span className="font-mono text-zinc-200">
+                  {progress.completedUnits} / {progress.totalUnits} Units ({progress.percentage}%)
+                </span>
+              </div>
+              <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                <div
+                  className="bg-emerald-500 h-full rounded-full transition-all duration-300 shadow-2xs"
+                  style={{ width: `${progress.percentage}%` }}
+                />
+              </div>
             </div>
-            <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-              <div
-                className="bg-purple-500 h-full rounded-full transition-all duration-300"
-                style={{
-                  width: `${Math.min(100, (((batchBlocks[0].config?.count || 0) / (batchBlocks[0].config?.target || 5)) * 100))}%`
-                }}
-              />
-            </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
