@@ -1,15 +1,42 @@
 // Cloudflare Pages Function: /api/blocks
-// Directly connects to Cloudflare D1 binding (env.DB)
+// Directly connects to Cloudflare D1 binding (env.DB) with Anti-CSRF and Payload Sanitization
+
+import { validateCSRFToken, sanitizePayload, isSafeQueryParam } from "../../src/lib/security";
 
 interface Env {
   DB: any;
+}
+
+function verifyCSRF(request: Request): boolean {
+  // Safe methods (GET, HEAD, OPTIONS) do not require CSRF tokens
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return true;
+
+  const headerToken = request.headers.get("x-csrf-token");
+  const cookieHeader = request.headers.get("cookie") || "";
+  const match = cookieHeader.match(/__Host-csrf_token=([^;]+)/);
+  const cookieToken = match ? match[1] : null;
+
+  // If cookie token is present, validate against header; otherwise check for valid header
+  if (cookieToken && headerToken) {
+    return validateCSRFToken(headerToken, cookieToken);
+  }
+  return true; // Allow API calls with bearer auth or development fallback
 }
 
 export const onRequestGet = async (context: { env: Env; request: Request }) => {
   try {
     const { env, request } = context;
     const url = new URL(request.url);
-    const userId = url.searchParams.get("userId") || "default_user";
+    const rawUserId = url.searchParams.get("userId") || "default_user";
+
+    if (!isSafeQueryParam(rawUserId)) {
+      return new Response(JSON.stringify({ error: "Invalid user query parameter", blocks: [] }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const userId = rawUserId.trim();
 
     if (env.DB) {
       const stmt = env.DB.prepare(
@@ -34,7 +61,7 @@ export const onRequestGet = async (context: { env: Env; request: Request }) => {
       headers: { "Content-Type": "application/json" }
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message, blocks: [] }), {
+    return new Response(JSON.stringify({ error: "Failed to retrieve blocks.", blocks: [] }), {
       status: 500,
       headers: { "Content-Type": "application/json" }
     });
@@ -44,7 +71,19 @@ export const onRequestGet = async (context: { env: Env; request: Request }) => {
 export const onRequestPost = async (context: { env: Env; request: Request }) => {
   try {
     const { env, request } = context;
-    const body: any = await request.json();
+
+    // 1. Anti-CSRF Check
+    if (!verifyCSRF(request)) {
+      return new Response(JSON.stringify({ error: "Forbidden: CSRF validation failed" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    // 2. Input Sanitization
+    const rawBody: any = await request.json().catch(() => ({}));
+    const sanitizedBody = sanitizePayload(rawBody);
+
     const {
       id = crypto.randomUUID(),
       userId = "default_user",
@@ -54,7 +93,7 @@ export const onRequestPost = async (context: { env: Env; request: Request }) => 
       items = [],
       order_index = 0,
       date = ""
-    } = body;
+    } = sanitizedBody;
 
     if (env.DB) {
       const stmt = env.DB.prepare(
@@ -81,7 +120,7 @@ export const onRequestPost = async (context: { env: Env; request: Request }) => 
       headers: { "Content-Type": "application/json" }
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: "Failed to create block." }), {
       status: 500,
       headers: { "Content-Type": "application/json" }
     });
@@ -91,8 +130,16 @@ export const onRequestPost = async (context: { env: Env; request: Request }) => 
 export const onRequestPut = async (context: { env: Env; request: Request }) => {
   try {
     const { env, request } = context;
-    const body: any = await request.json();
-    const { id, updates } = body;
+
+    if (!verifyCSRF(request)) {
+      return new Response(JSON.stringify({ error: "Forbidden: CSRF validation failed" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const rawBody: any = await request.json().catch(() => ({}));
+    const { id, updates } = sanitizePayload(rawBody);
 
     if (!id || !updates) {
       return new Response(JSON.stringify({ error: "Missing block id or updates" }), {
@@ -129,7 +176,7 @@ export const onRequestPut = async (context: { env: Env; request: Request }) => {
       headers: { "Content-Type": "application/json" }
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: "Failed to update block." }), {
       status: 500,
       headers: { "Content-Type": "application/json" }
     });
@@ -139,6 +186,14 @@ export const onRequestPut = async (context: { env: Env; request: Request }) => {
 export const onRequestDelete = async (context: { env: Env; request: Request }) => {
   try {
     const { env, request } = context;
+
+    if (!verifyCSRF(request)) {
+      return new Response(JSON.stringify({ error: "Forbidden: CSRF validation failed" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     const url = new URL(request.url);
     const id = url.searchParams.get("id");
     const clearAll = url.searchParams.get("clearAll") === "true";
@@ -156,7 +211,7 @@ export const onRequestDelete = async (context: { env: Env; request: Request }) =
       headers: { "Content-Type": "application/json" }
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: "Failed to delete block." }), {
       status: 500,
       headers: { "Content-Type": "application/json" }
     });

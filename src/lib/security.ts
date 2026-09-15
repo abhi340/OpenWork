@@ -314,6 +314,12 @@ export function validateAIEndpoint(
   }
 }
 
+const SQL_INJECTION_PATTERN = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|EXEC|UNION|TRUNCATE)\b|--|\/\*|\*\/|;)/i;
+
+export function isSafeQueryParam(param: string): boolean {
+  return !SQL_INJECTION_PATTERN.test(param);
+}
+
 export function sanitizeUrl(url: string): string {
   if (!url || typeof url !== "string") return "#";
   const trimmed = url.trim();

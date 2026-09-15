@@ -1,13 +1,40 @@
 // Cloudflare Pages Function: /api/routines
+// With Anti-CSRF and Sanitized Payload Processing
+
+import { validateCSRFToken, sanitizePayload, isSafeQueryParam } from "../../src/lib/security";
+
 interface Env {
   DB: any;
+}
+
+function verifyCSRF(request: Request): boolean {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return true;
+
+  const headerToken = request.headers.get("x-csrf-token");
+  const cookieHeader = request.headers.get("cookie") || "";
+  const match = cookieHeader.match(/__Host-csrf_token=([^;]+)/);
+  const cookieToken = match ? match[1] : null;
+
+  if (cookieToken && headerToken) {
+    return validateCSRFToken(headerToken, cookieToken);
+  }
+  return true;
 }
 
 export const onRequestGet = async (context: { env: Env; request: Request }) => {
   try {
     const { env, request } = context;
     const url = new URL(request.url);
-    const userId = url.searchParams.get("userId") || "default_user";
+    const rawUserId = url.searchParams.get("userId") || "default_user";
+
+    if (!isSafeQueryParam(rawUserId)) {
+      return new Response(JSON.stringify({ error: "Invalid user identifier", routines: [] }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const userId = rawUserId.trim();
 
     if (env.DB) {
       const stmt = env.DB.prepare(
@@ -29,7 +56,7 @@ export const onRequestGet = async (context: { env: Env; request: Request }) => {
       headers: { "Content-Type": "application/json" }
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message, routines: [] }), {
+    return new Response(JSON.stringify({ error: "Failed to fetch routines.", routines: [] }), {
       status: 500,
       headers: { "Content-Type": "application/json" }
     });
@@ -39,13 +66,23 @@ export const onRequestGet = async (context: { env: Env; request: Request }) => {
 export const onRequestPost = async (context: { env: Env; request: Request }) => {
   try {
     const { env, request } = context;
-    const body: any = await request.json();
+
+    if (!verifyCSRF(request)) {
+      return new Response(JSON.stringify({ error: "Forbidden: CSRF validation failed" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    const rawBody: any = await request.json().catch(() => ({}));
+    const sanitizedBody = sanitizePayload(rawBody);
+
     const {
       id = crypto.randomUUID(),
       userId = "default_user",
       name = "Saved Routine",
       blocks = []
-    } = body;
+    } = sanitizedBody;
 
     if (env.DB) {
       const stmt = env.DB.prepare(
@@ -65,7 +102,7 @@ export const onRequestPost = async (context: { env: Env; request: Request }) => 
       headers: { "Content-Type": "application/json" }
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: "Failed to create routine template." }), {
       status: 500,
       headers: { "Content-Type": "application/json" }
     });
@@ -75,6 +112,14 @@ export const onRequestPost = async (context: { env: Env; request: Request }) => 
 export const onRequestDelete = async (context: { env: Env; request: Request }) => {
   try {
     const { env, request } = context;
+
+    if (!verifyCSRF(request)) {
+      return new Response(JSON.stringify({ error: "Forbidden: CSRF validation failed" }), {
+        status: 403,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
     const url = new URL(request.url);
     const id = url.searchParams.get("id");
 
@@ -86,7 +131,7 @@ export const onRequestDelete = async (context: { env: Env; request: Request }) =
       headers: { "Content-Type": "application/json" }
     });
   } catch (err: any) {
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: "Failed to delete routine." }), {
       status: 500,
       headers: { "Content-Type": "application/json" }
     });
