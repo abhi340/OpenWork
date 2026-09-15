@@ -29,6 +29,7 @@ import { useAuth, AIConfig } from "@/context/AuthContext";
 import { useWorkspaceStore, BlockType } from "@/store/workspaceStore";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { sendAIChatRequest } from "@/lib/ai";
+import { parseAICopilotResponse } from "@/lib/aiParser";
 import Link from "next/link";
 
 interface GeneratedBlock {
@@ -250,98 +251,33 @@ ACTIONS (Use ONLY when modifying board):
         ]);
       } else {
         const rawReply = data.reply || "";
-        let suggestedBlocks: GeneratedBlock[] | undefined;
-        let cleanContent = rawReply;
+        const parsed = parseAICopilotResponse(rawReply, textToSend);
 
-        // Action Command: CLEAR_BOARD
-        if (rawReply.includes("<<<ACTION: CLEAR_BOARD>>>") || rawReply.includes("<<<ACTION:CLEAR_BOARD>>>") || rawReply.includes("<<<BLOCKS: []>>>")) {
+        // 1. Execute Actions if detected
+        if (parsed.action?.type === "CLEAR_BOARD") {
           await clearAllBlocks();
-          cleanContent = rawReply
-            .replace(/<<<ACTION:[\s\S]*?>>>/g, "")
-            .replace(/<<<BLOCKS:[\s\S]*?>>>/g, "")
-            .trim() || "✨ Your execution board has been completely cleared.";
-        }
-
-        // Action Command: REMOVE_BLOCK
-        const removeBlockMatch = rawReply.match(/<<<ACTION:\s*REMOVE_BLOCK\s*,\s*["']?([^"'>]+)["']?\s*>>>/i);
-        if (removeBlockMatch) {
-          const target = removeBlockMatch[1].trim().toLowerCase();
+        } else if (parsed.action?.type === "REMOVE_BLOCK" && parsed.action.target) {
+          const target = parsed.action.target.toLowerCase();
           const found = blocks.find((b) => b.id.toLowerCase() === target || b.title.toLowerCase().includes(target) || b.type.toLowerCase().includes(target));
           if (found) {
             await removeBlock(found.id);
-            cleanContent = rawReply.replace(/<<<ACTION:[\s\S]*?>>>/g, "").trim() || `🗑️ Removed "${found.title}" from your board.`;
           }
-        }
-
-        // Action Command: REMOVE_DATE
-        const removeDateMatch = rawReply.match(/<<<ACTION:\s*REMOVE_DATE\s*,\s*["']?([^"'>]+)["']?\s*>>>/i);
-        if (removeDateMatch) {
-          const targetDate = removeDateMatch[1].trim();
+        } else if (parsed.action?.type === "REMOVE_DATE" && parsed.action.target) {
+          const targetDate = parsed.action.target;
           const matching = blocks.filter((b) => b.config?.date === targetDate);
           for (const b of matching) {
             await removeBlock(b.id);
           }
-          cleanContent = rawReply.replace(/<<<ACTION:[\s\S]*?>>>/g, "").trim() || `🗑️ Removed ${matching.length} widgets scheduled for ${targetDate}.`;
         }
-
-        // 1. Primary parser: <<<BLOCKS: [...]>>>
-        const blocksMatch = rawReply.match(/<<<BLOCKS:([\s\S]*?)>>>/);
-        if (blocksMatch) {
-          try {
-            const parsed = JSON.parse(blocksMatch[1]);
-            suggestedBlocks = Array.isArray(parsed) ? parsed : [parsed];
-          } catch (jsonErr) {
-            console.log("Could not parse AI block JSON", jsonErr);
-          }
-        }
-
-        // 2. Fallback parser: Extract json code fences if AI outputs raw JSON widgets
-        if (!suggestedBlocks) {
-          const jsonFenceMatch = rawReply.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-          if (jsonFenceMatch) {
-            try {
-              const parsed = JSON.parse(jsonFenceMatch[1]);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                suggestedBlocks = parsed.map((item: any) => ({
-                  ...item,
-                  type: item.type || (item.config?.count !== undefined ? "counter_batch" : item.config?.timeRemaining !== undefined ? "timer_task" : item.config?.columns ? "table" : "checklist")
-                }));
-              } else if (parsed && typeof parsed === "object") {
-                const inferredType = parsed.type || (parsed.config?.count !== undefined ? "counter_batch" : parsed.config?.timeRemaining !== undefined ? "timer_task" : parsed.config?.columns ? "table" : "checklist");
-                suggestedBlocks = [{ ...parsed, type: inferredType }];
-              }
-            } catch (e) {}
-          }
-        }
-
-        // Always sanitize cleanContent so internal tags never display in the user bubble
-        cleanContent = cleanContent
-          .replace(/<<<BLOCKS:[\s\S]*?>>>/g, "")
-          .replace(/<<<ACTION:[\s\S]*?>>>/g, "")
-          .trim();
-
-        // Strict Task List Fallback: ONLY extract if lines are explicitly bulleted items and not conversational sentences
-        const rawLines = cleanContent.split("\n").map((l: string) => l.trim());
-        const taskBulletLines = rawLines
-          .filter((l: string) => /^[-*•\d+.]\s+/.test(l) || /^\[\s*\]\s+/.test(l))
-          .map((l: string) => l.replace(/^[-*•\d+.]\s+/, "").replace(/^\[\s*\]\s+/, "").trim())
-          .filter((l: string) => 
-            l.length >= 4 && 
-            l.length <= 100 && 
-            !l.endsWith("?") &&
-            !/^(it sounds|to confirm|also|why not|would you|here is|i'd like|sorry|sure)/i.test(l)
-          );
-
-        const suggestedTasks = !suggestedBlocks && taskBulletLines.length >= 2 && taskBulletLines.length <= 8 ? taskBulletLines : undefined;
 
         setMessages((prev) => [
           ...prev,
           {
             id: crypto.randomUUID(),
             role: "assistant",
-            content: cleanContent,
-            suggestedBlocks,
-            suggestedTasks
+            content: parsed.cleanContent || "✨ Workspace updated successfully.",
+            suggestedBlocks: parsed.suggestedBlocks,
+            suggestedTasks: parsed.suggestedTasks
           }
         ]);
       }
