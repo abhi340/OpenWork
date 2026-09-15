@@ -1,4 +1,18 @@
 import { create } from 'zustand';
+import { db, auth } from '@/lib/firebase';
+import {
+  collection,
+  doc,
+  getDocs,
+  setDoc,
+  deleteDoc,
+  updateDoc,
+  query,
+  where,
+  serverTimestamp,
+  onSnapshot,
+  Unsubscribe
+} from 'firebase/firestore';
 
 export type BlockType = 
   | 'counter_batch' 
@@ -54,6 +68,9 @@ const saveCachedBlocks = (blocks: WorkBlock[]) => {
 };
 
 const getCurrentUserId = (): string => {
+  if (auth.currentUser?.uid) {
+    return auth.currentUser.uid;
+  }
   if (typeof window === "undefined") return "default_user";
   try {
     const profile = localStorage.getItem("openwork_user_profile");
@@ -75,24 +92,43 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({ isLoading: true });
       const currentUserId = getCurrentUserId();
 
-      // Cloudflare D1 Serverless Edge API
+      // Cloud Firestore query
       try {
-        const res = await fetch(`/api/blocks?userId=${encodeURIComponent(currentUserId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.blocks)) {
-            set({ blocks: data.blocks, isLoading: false });
-            saveCachedBlocks(data.blocks);
-            return;
-          }
+        const blocksQuery = query(
+          collection(db, "daily_blocks"),
+          where("userId", "==", currentUserId)
+        );
+        const querySnap = await getDocs(blocksQuery);
+        
+        if (!querySnap.empty) {
+          const fetchedBlocks: WorkBlock[] = [];
+          querySnap.forEach((docSnap) => {
+            const data = docSnap.data();
+            fetchedBlocks.push({
+              id: docSnap.id,
+              type: data.type || "checklist",
+              title: data.title || "Untitled Block",
+              config: data.config || {},
+              items: data.items || [],
+              order_index: data.order_index ?? 0
+            });
+          });
+
+          // Sort by order_index
+          fetchedBlocks.sort((a, b) => a.order_index - b.order_index);
+          set({ blocks: fetchedBlocks, isLoading: false });
+          saveCachedBlocks(fetchedBlocks);
+          return;
         }
-      } catch (d1Err) {}
+      } catch (firestoreErr) {
+        console.warn("Firestore fetch fallback to cache:", firestoreErr);
+      }
 
       // Fallback to local cached blocks
       const cached = getCachedBlocks();
       set({ blocks: cached, isLoading: false });
     } catch (err) {
-      console.warn("Failed to fetch blocks from Cloudflare D1:", err);
+      console.warn("Failed to fetch blocks:", err);
       set({ isLoading: false });
     }
   },
@@ -119,24 +155,23 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ blocks: nextBlocks });
     saveCachedBlocks(nextBlocks);
 
-    // 2. Sync with Cloudflare D1
+    // 2. Sync with Cloud Firestore
     try {
-      await fetch('/api/blocks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: block.id,
-          userId: currentUserId,
-          title: block.title,
-          type: block.type,
-          config: block.config,
-          items: block.items || [],
-          order_index: block.order_index,
-          date: targetDate
-        })
+      const blockRef = doc(db, "daily_blocks", id);
+      await setDoc(blockRef, {
+        id: block.id,
+        userId: currentUserId,
+        date: targetDate,
+        title: block.title,
+        type: block.type,
+        config: block.config || {},
+        items: block.items || [],
+        order_index: block.order_index,
+        created_at: serverTimestamp(),
+        updated_at: serverTimestamp()
       });
     } catch (err) {
-      console.warn("Could not sync block creation to Cloudflare D1 (saved locally):", err);
+      console.warn("Could not sync block creation to Cloud Firestore (saved locally):", err);
     }
   },
 
@@ -149,11 +184,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     saveCachedBlocks(nextBlocks);
 
-    // 2. Sync with Cloudflare D1
+    // 2. Sync with Cloud Firestore
     try {
-      await fetch(`/api/blocks?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const blockRef = doc(db, "daily_blocks", id);
+      await deleteDoc(blockRef);
     } catch (err) {
-      console.warn("Could not sync block deletion to Cloudflare D1:", err);
+      console.warn("Could not sync block deletion to Cloud Firestore:", err);
     }
   },
 
@@ -163,33 +199,69 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ blocks: nextBlocks });
     saveCachedBlocks(nextBlocks);
 
-    // 2. Sync with Cloudflare D1
+    // 2. Sync with Cloud Firestore
     try {
-      await fetch('/api/blocks', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, updates })
+      const blockRef = doc(db, "daily_blocks", id);
+      await updateDoc(blockRef, {
+        ...updates,
+        updated_at: serverTimestamp()
       });
     } catch (err) {
-      console.warn("Could not sync block update to Cloudflare D1:", err);
+      console.warn("Could not sync block update to Cloud Firestore:", err);
     }
   },
 
   clearAllBlocks: async () => {
-    const currentUserId = getCurrentUserId();
+    const currentBlocks = get().blocks;
     set({ blocks: [], activeBlockId: null });
     saveCachedBlocks([]);
 
     try {
-      await fetch(`/api/blocks?clearAll=true&userId=${encodeURIComponent(currentUserId)}`, { method: 'DELETE' });
+      for (const block of currentBlocks) {
+        await deleteDoc(doc(db, "daily_blocks", block.id));
+      }
     } catch (err) {
-      console.warn("Could not clear blocks on Cloudflare D1:", err);
+      console.warn("Could not clear blocks in Firestore:", err);
     }
   },
 
   setActiveBlock: (id) => set({ activeBlockId: id }),
 
   initRealtime: () => {
+    let unsubscribeFirestore: Unsubscribe | null = null;
+    const currentUserId = getCurrentUserId();
+
+    try {
+      const blocksQuery = query(
+        collection(db, "daily_blocks"),
+        where("userId", "==", currentUserId)
+      );
+
+      unsubscribeFirestore = onSnapshot(blocksQuery, (snapshot) => {
+        if (!snapshot.empty) {
+          const syncedBlocks: WorkBlock[] = [];
+          snapshot.forEach((docSnap) => {
+            const data = docSnap.data();
+            syncedBlocks.push({
+              id: docSnap.id,
+              type: data.type || "checklist",
+              title: data.title || "Untitled Block",
+              config: data.config || {},
+              items: data.items || [],
+              order_index: data.order_index ?? 0
+            });
+          });
+          syncedBlocks.sort((a, b) => a.order_index - b.order_index);
+          set({ blocks: syncedBlocks });
+          saveCachedBlocks(syncedBlocks);
+        }
+      }, (err) => {
+        console.warn("Firestore realtime listener error:", err);
+      });
+    } catch (e) {
+      console.warn("Could not initialize Firestore listener:", e);
+    }
+
     const handleStorage = (e: StorageEvent) => {
       if (e.key === CACHE_KEY && e.newValue) {
         try {
@@ -198,7 +270,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
     };
     window.addEventListener("storage", handleStorage);
+
     return () => {
+      if (unsubscribeFirestore) unsubscribeFirestore();
       window.removeEventListener("storage", handleStorage);
     };
   }

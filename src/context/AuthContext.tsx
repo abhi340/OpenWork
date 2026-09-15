@@ -1,6 +1,20 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import {
+  auth,
+  db,
+  googleProvider,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  signInWithPhoneNumber,
+  setupRecaptcha,
+  type ConfirmationResult
+} from "@/lib/firebase";
+import { onAuthStateChanged, User as FirebaseUser, updateProfile as updateFirebaseProfile } from "firebase/auth";
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 
 export type UserRole = "admin" | "manager" | "member" | "guest";
 
@@ -16,6 +30,7 @@ export interface UserProfile {
   id?: string;
   name: string;
   email: string;
+  phoneNumber?: string;
   role: UserRole;
   workspaceName: string;
   jobTitle?: string;
@@ -28,18 +43,22 @@ export interface UserProfile {
 interface AuthResult {
   success: boolean;
   error?: string;
+  confirmationResult?: ConfirmationResult;
 }
 
 interface AuthContextType {
   user: UserProfile;
+  firebaseUser: FirebaseUser | null;
   aiConfig: AIConfig;
   isAuthenticated: boolean;
   isGuest: boolean;
   isLoading: boolean;
   login: (email: string, pass: string) => Promise<AuthResult>;
   signup: (email: string, pass: string, name: string) => Promise<AuthResult>;
-  loginWithOAuth: (provider: "google" | "microsoft" | "github") => Promise<AuthResult>;
-  logout: () => void;
+  loginWithGoogle: () => Promise<AuthResult>;
+  sendPhoneOtp: (phoneNumber: string, containerId?: string) => Promise<AuthResult>;
+  verifyPhoneOtp: (confirmationResult: ConfirmationResult, verificationCode: string) => Promise<AuthResult>;
+  logout: () => Promise<void>;
   setRole: (role: UserRole) => void;
   setWorkspaceName: (name: string) => void;
   updateProfile: (updates: Partial<UserProfile>) => Promise<void>;
@@ -51,6 +70,7 @@ const defaultUser: UserProfile = {
   id: "user_owner_001",
   name: "Abhiram Kodicherla",
   email: "abhicm019@gmail.com",
+  phoneNumber: "",
   role: "admin",
   workspaceName: "Execution Workspace",
   jobTitle: "Founder & Full-Stack Engineer",
@@ -72,54 +92,135 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile>(defaultUser);
+  const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [aiConfig, setAIConfig] = useState<AIConfig>(defaultAIConfig);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Restore session from localStorage on initial load
-  useEffect(() => {
+  // Sync / Load User Profile from Firestore
+  const syncUserProfile = useCallback(async (fbUser: FirebaseUser, fallbackName?: string) => {
     try {
-      const savedAuth = localStorage.getItem("openwork_auth_session");
-      const savedProfile = localStorage.getItem("openwork_user_profile");
-      const savedAI = localStorage.getItem("openwork_ai_config");
+      const userRef = doc(db, "users", fbUser.uid);
+      const userSnap = await getDoc(userRef);
 
-      if (savedAuth === "true" || savedAuth) {
-        setIsAuthenticated(true);
-        if (savedProfile) {
-          try {
-            setUser((prev) => ({ ...prev, ...JSON.parse(savedProfile) }));
-          } catch (e) {}
-        }
+      const email = fbUser.email || (fbUser.phoneNumber ? `${fbUser.phoneNumber}@phone.openwork.app` : "user@openwork.app");
+      const name = fbUser.displayName || fallbackName || (email.includes("@") ? email.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, l => l.toUpperCase()) : "OpenWork User");
+      const role: UserRole = (email.includes("admin") || email === "abhicm019@gmail.com") ? "admin" : "member";
+
+      if (userSnap.exists()) {
+        const data = userSnap.data();
+        const profile: UserProfile = {
+          id: fbUser.uid,
+          name: data.name || name,
+          email: data.email || email,
+          phoneNumber: data.phoneNumber || fbUser.phoneNumber || "",
+          role: data.role || role,
+          workspaceName: data.workspaceName || `${name}'s Workspace`,
+          jobTitle: data.jobTitle || "Product Team",
+          avatarUrl: data.avatarUrl || fbUser.photoURL || "",
+          workHours: data.workHours || "9:00 AM – 6:00 PM",
+          soundEnabled: data.soundEnabled ?? true,
+          defaultSprintMins: data.defaultSprintMins || 25
+        };
+        setUser(profile);
+        localStorage.setItem("openwork_user_profile", JSON.stringify(profile));
       } else {
-        setIsAuthenticated(false);
-      }
+        // Create initial Firestore Profile Document
+        const newProfile: UserProfile = {
+          id: fbUser.uid,
+          name: name,
+          email: email,
+          phoneNumber: fbUser.phoneNumber || "",
+          role: role,
+          workspaceName: `${name}'s Workspace`,
+          jobTitle: "Product Team",
+          avatarUrl: fbUser.photoURL || "",
+          workHours: "9:00 AM – 6:00 PM",
+          soundEnabled: true,
+          defaultSprintMins: 25
+        };
 
-      if (savedAI) {
-        try {
-          setAIConfig((prev) => ({ ...prev, ...JSON.parse(savedAI) }));
-        } catch (e) {}
+        await setDoc(userRef, {
+          uid: fbUser.uid,
+          name: newProfile.name,
+          email: newProfile.email,
+          phoneNumber: newProfile.phoneNumber,
+          role: newProfile.role,
+          workspaceName: newProfile.workspaceName,
+          jobTitle: newProfile.jobTitle,
+          avatarUrl: newProfile.avatarUrl,
+          workHours: newProfile.workHours,
+          soundEnabled: newProfile.soundEnabled,
+          defaultSprintMins: newProfile.defaultSprintMins,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+
+        setUser(newProfile);
+        localStorage.setItem("openwork_user_profile", JSON.stringify(newProfile));
       }
     } catch (err) {
-      console.error("Failed to restore session:", err);
-    } finally {
-      setIsLoading(false);
+      console.warn("Firestore profile sync fallback (local only):", err);
+      const email = fbUser.email || (fbUser.phoneNumber ? `${fbUser.phoneNumber}@phone.openwork.app` : "user@openwork.app");
+      const name = fbUser.displayName || fallbackName || email.split("@")[0];
+      const localProfile: UserProfile = {
+        id: fbUser.uid,
+        name: name,
+        email: email,
+        phoneNumber: fbUser.phoneNumber || "",
+        role: email === "abhicm019@gmail.com" ? "admin" : "member",
+        workspaceName: `${name}'s Workspace`,
+        jobTitle: "Product Team",
+        avatarUrl: fbUser.photoURL || "",
+        workHours: "9:00 AM – 6:00 PM",
+        soundEnabled: true,
+        defaultSprintMins: 25
+      };
+      setUser(localProfile);
+      localStorage.setItem("openwork_user_profile", JSON.stringify(localProfile));
     }
-
-    const handleAuthChange = () => {
-      const isAuth = localStorage.getItem("openwork_auth_session") === "true";
-      setIsAuthenticated(isAuth);
-      const profile = localStorage.getItem("openwork_user_profile");
-      if (profile) {
-        try {
-          setUser(JSON.parse(profile));
-        } catch (e) {}
-      }
-    };
-
-    window.addEventListener("openwork_auth_changed", handleAuthChange);
-    return () => window.removeEventListener("openwork_auth_changed", handleAuthChange);
   }, []);
 
+  // Firebase Auth State Listener
+  useEffect(() => {
+    // Restore AI Config from local storage
+    try {
+      const savedAI = localStorage.getItem("openwork_ai_config");
+      if (savedAI) {
+        setAIConfig((prev) => ({ ...prev, ...JSON.parse(savedAI) }));
+      }
+    } catch (e) {}
+
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      setIsLoading(true);
+      if (fbUser) {
+        setFirebaseUser(fbUser);
+        setIsAuthenticated(true);
+        localStorage.setItem("openwork_auth_session", "true");
+        await syncUserProfile(fbUser);
+      } else {
+        setFirebaseUser(null);
+        // Check if there was an offline/local session stored
+        const savedAuth = localStorage.getItem("openwork_auth_session");
+        const savedProfile = localStorage.getItem("openwork_user_profile");
+        if (savedAuth === "true" && savedProfile) {
+          try {
+            setUser(JSON.parse(savedProfile));
+            setIsAuthenticated(true);
+          } catch (e) {
+            setIsAuthenticated(false);
+          }
+        } else {
+          setIsAuthenticated(false);
+        }
+      }
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [syncUserProfile]);
+
+  // 1. Email/Password Login
   const login = async (email: string, pass: string): Promise<AuthResult> => {
     try {
       setIsLoading(true);
@@ -130,93 +231,163 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return { success: false, error: "Please enter your email and password." };
       }
 
-      // Profile mapping
-      const userName = cleanEmail.split("@")[0].replace(/[._-]/g, " ").replace(/\b\w/g, l => l.toUpperCase());
-      const role: UserRole = cleanEmail.includes("admin") || cleanEmail === "abhicm019@gmail.com" ? "admin" : "member";
-
-      const authenticatedUser: UserProfile = {
-        id: `user_${cleanEmail.replace(/[^a-z0-9]/g, "_")}`,
-        name: user.name || userName,
-        email: cleanEmail,
-        role: role,
-        workspaceName: `${userName}'s Workspace`,
-        jobTitle: "Team Member",
-        avatarUrl: user.avatarUrl || "",
-        workHours: "9:00 AM – 6:00 PM",
-        soundEnabled: true,
-        defaultSprintMins: 25
-      };
-
-      setUser(authenticatedUser);
+      const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, pass);
+      await syncUserProfile(userCredential.user);
       setIsAuthenticated(true);
       localStorage.setItem("openwork_auth_session", "true");
-      localStorage.setItem("openwork_user_profile", JSON.stringify(authenticatedUser));
-      window.dispatchEvent(new Event("openwork_auth_changed"));
-
       setIsLoading(false);
       return { success: true };
     } catch (err: any) {
       setIsLoading(false);
-      return { success: false, error: err.message || "Authentication failed." };
+      let errorMsg = err.message || "Failed to authenticate with Firebase.";
+      if (err.code === "auth/invalid-credential" || err.code === "auth/user-not-found" || err.code === "auth/wrong-password") {
+        errorMsg = "Invalid email or password. Please try again or create an account.";
+      } else if (err.code === "auth/too-many-requests") {
+        errorMsg = "Too many failed attempts. Please wait a few minutes before retrying.";
+      } else if (err.code === "auth/invalid-api-key" || err.code === "auth/api-key-not-valid.pleas") {
+        errorMsg = "Firebase API key is not configured. Please check your project settings.";
+      }
+      return { success: false, error: errorMsg };
     }
   };
 
+  // 2. Email/Password Signup
   const signup = async (email: string, pass: string, name: string): Promise<AuthResult> => {
     try {
       setIsLoading(true);
       const cleanEmail = email.trim().toLowerCase();
-      const cleanName = name.trim() || cleanEmail.split("@")[0];
+      const cleanName = name.trim();
 
-      if (!cleanEmail || !pass) {
+      if (!cleanEmail || !pass || !cleanName) {
         setIsLoading(false);
         return { success: false, error: "Please fill in all registration fields." };
       }
 
-      const role: UserRole = cleanEmail === "abhicm019@gmail.com" ? "admin" : "member";
+      if (pass.length < 6) {
+        setIsLoading(false);
+        return { success: false, error: "Password must be at least 6 characters long." };
+      }
 
-      const newUser: UserProfile = {
-        id: `user_${cleanEmail.replace(/[^a-z0-9]/g, "_")}`,
-        name: cleanName,
-        email: cleanEmail,
-        role: role,
-        workspaceName: `${cleanName}'s Workspace`,
-        jobTitle: "Product Team",
-        avatarUrl: "",
-        workHours: "9:00 AM – 6:00 PM",
-        soundEnabled: true,
-        defaultSprintMins: 25
-      };
+      const userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+      
+      // Update Firebase Auth display name
+      if (auth.currentUser) {
+        await updateFirebaseProfile(auth.currentUser, { displayName: cleanName });
+      }
 
-      setUser(newUser);
+      await syncUserProfile(userCredential.user, cleanName);
       setIsAuthenticated(true);
       localStorage.setItem("openwork_auth_session", "true");
-      localStorage.setItem("openwork_user_profile", JSON.stringify(newUser));
-      window.dispatchEvent(new Event("openwork_auth_changed"));
-
       setIsLoading(false);
       return { success: true };
     } catch (err: any) {
       setIsLoading(false);
-      return { success: false, error: err.message || "Registration failed." };
+      let errorMsg = err.message || "Failed to create account.";
+      if (err.code === "auth/email-already-in-use") {
+        errorMsg = "An account with this email already exists. Please sign in.";
+      } else if (err.code === "auth/weak-password") {
+        errorMsg = "Password is too weak. Please use at least 6 characters.";
+      }
+      return { success: false, error: errorMsg };
     }
   };
 
-  const loginWithOAuth = async (provider: "google" | "microsoft" | "github"): Promise<AuthResult> => {
+  // 3. Google Sign-In (OAuth Popup)
+  const loginWithGoogle = async (): Promise<AuthResult> => {
     try {
       setIsLoading(true);
+      const result = await signInWithPopup(auth, googleProvider);
+      await syncUserProfile(result.user);
+      setIsAuthenticated(true);
+      localStorage.setItem("openwork_auth_session", "true");
+      setIsLoading(false);
       return { success: true };
     } catch (err: any) {
       setIsLoading(false);
-      return { success: false, error: err.message || `Failed to authenticate with ${provider}.` };
+      let errorMsg = err.message || "Google Sign-In failed.";
+      if (err.code === "auth/popup-closed-by-user") {
+        errorMsg = "Google Sign-In popup was closed before completing.";
+      } else if (err.code === "auth/popup-blocked") {
+        errorMsg = "Popup was blocked by your browser. Please allow popups for localhost.";
+      } else if (err.code === "auth/unauthorized-domain") {
+        errorMsg = "Unauthorized domain. Please add this domain to Firebase Console > Authentication > Settings > Authorized domains.";
+      } else if (err.code === "auth/operation-not-allowed" || err.code === "auth/admin-restricted-operation") {
+        errorMsg = "Google Sign-In is not enabled yet in your Firebase Console. Go to Firebase Console > Authentication > Sign-in method and enable Google.";
+      }
+      return { success: false, error: errorMsg };
     }
   };
 
-  const logout = () => {
+  // 4. Phone Auth - Send SMS OTP
+  const sendPhoneOtp = async (phoneNumber: string, containerId = "recaptcha-container"): Promise<AuthResult> => {
+    try {
+      setIsLoading(true);
+      const cleanPhone = phoneNumber.trim();
+
+      if (!cleanPhone || cleanPhone.length < 8) {
+        setIsLoading(false);
+        return { success: false, error: "Please enter a valid phone number with country code (e.g., +15551234567 or +919876543210)." };
+      }
+
+      const verifier = setupRecaptcha(containerId);
+      const confirmationResult = await signInWithPhoneNumber(auth, cleanPhone, verifier);
+      setIsLoading(false);
+      return { success: true, confirmationResult };
+    } catch (err: any) {
+      setIsLoading(false);
+      let errorMsg = err.message || "Failed to send SMS verification code.";
+      if (err.code === "auth/invalid-phone-number") {
+        errorMsg = "The phone number format is invalid. Please use international format: +[CountryCode][Number] (e.g., +919876543210).";
+      } else if (err.code === "auth/quota-exceeded") {
+        errorMsg = "SMS quota exceeded for this project. Please try again later or use Google / Email sign-in.";
+      } else if (err.code === "auth/captcha-check-failed") {
+        errorMsg = "ReCAPTCHA verification failed. Please refresh and try again.";
+      }
+      return { success: false, error: errorMsg };
+    }
+  };
+
+  // 5. Phone Auth - Verify SMS OTP
+  const verifyPhoneOtp = async (confirmationResult: ConfirmationResult, verificationCode: string): Promise<AuthResult> => {
+    try {
+      setIsLoading(true);
+      const cleanCode = verificationCode.trim();
+
+      if (!cleanCode || cleanCode.length < 4) {
+        setIsLoading(false);
+        return { success: false, error: "Please enter the 6-digit SMS verification code." };
+      }
+
+      const result = await confirmationResult.confirm(cleanCode);
+      await syncUserProfile(result.user);
+      setIsAuthenticated(true);
+      localStorage.setItem("openwork_auth_session", "true");
+      setIsLoading(false);
+      return { success: true };
+    } catch (err: any) {
+      setIsLoading(false);
+      let errorMsg = err.message || "Verification failed.";
+      if (err.code === "auth/invalid-verification-code") {
+        errorMsg = "Invalid verification code. Please check the SMS and try again.";
+      } else if (err.code === "auth/code-expired") {
+        errorMsg = "Verification code has expired. Please request a new code.";
+      }
+      return { success: false, error: errorMsg };
+    }
+  };
+
+  // Logout
+  const logout = async () => {
+    try {
+      await firebaseSignOut(auth);
+    } catch (e) {
+      console.warn("Firebase signout error:", e);
+    }
     localStorage.removeItem("openwork_auth_session");
     localStorage.removeItem("openwork_user_profile");
     setIsAuthenticated(false);
+    setFirebaseUser(null);
     setUser(defaultUser);
-    window.dispatchEvent(new Event("openwork_auth_changed"));
   };
 
   const setRole = (role: UserRole) => {
@@ -231,7 +402,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updated = { ...user, ...updates };
     setUser(updated);
     localStorage.setItem("openwork_user_profile", JSON.stringify(updated));
-    window.dispatchEvent(new Event("openwork_auth_changed"));
+
+    if (firebaseUser?.uid) {
+      try {
+        const userRef = doc(db, "users", firebaseUser.uid);
+        await updateDoc(userRef, {
+          ...updates,
+          updatedAt: serverTimestamp()
+        });
+      } catch (err) {
+        console.warn("Failed to update Firestore profile document:", err);
+      }
+    }
   };
 
   const updateAIConfig = (updates: Partial<AIConfig>) => {
@@ -246,13 +428,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
+        firebaseUser,
         aiConfig,
         isAuthenticated,
         isGuest: !isAuthenticated,
         isLoading,
         login,
         signup,
-        loginWithOAuth,
+        loginWithGoogle,
+        sendPhoneOtp,
+        verifyPhoneOtp,
         logout,
         setRole,
         setWorkspaceName,

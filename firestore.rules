@@ -1,0 +1,185 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches Firebase Auth UID)
+    // Fields:
+    //   - uid: string (required, immutable, must match Auth UID)
+    //   - name: string (required, 1-100 chars)
+    //   - email: string (optional/required, valid email or phone-auth placeholder)
+    //   - phoneNumber: string (optional, 0-30 chars)
+    //   - role: string ('admin' | 'manager' | 'member' | 'guest')
+    //   - workspaceName: string (required, 1-100 chars)
+    //   - jobTitle: string (optional, 0-100 chars)
+    //   - avatarUrl: string (optional, 0-500 chars)
+    //   - workHours: string (optional, 0-50 chars)
+    //   - soundEnabled: bool (optional)
+    //   - defaultSprintMins: number (optional, 1-180)
+    //   - createdAt: timestamp (immutable)
+    //   - updatedAt: timestamp (recent)
+    //
+    // Collection: daily_blocks
+    // Document ID: {blockId}
+    // Fields:
+    //   - id: string (required, 1-100 chars)
+    //   - userId: string (required, immutable, matches Auth UID)
+    //   - date: string (required, 10 chars YYYY-MM-DD)
+    //   - title: string (required, 1-200 chars)
+    //   - type: string ('focus' | 'scratchpad' | 'links' | 'tasks' | 'metric' | 'routine')
+    //   - config: map (optional)
+    //   - items: list (optional, max 100 items)
+    //   - order_index: number (>= 0)
+    //   - created_at: timestamp (immutable)
+    //   - updated_at: timestamp (recent)
+    //
+    // Collection: routines
+    // Document ID: {routineId}
+    // Fields:
+    //   - id: string (required, 1-100 chars)
+    //   - userId: string (required, immutable, matches Auth UID)
+    //   - title: string (required, 1-200 chars)
+    //   - description: string (optional, max 500 chars)
+    //   - blocks: list (optional, max 50 items)
+    //   - created_at: timestamp (immutable)
+    //   - updated_at: timestamp (recent)
+    //
+    // Collection: scratchpads
+    // Document ID: {scratchpadId}
+    // Fields:
+    //   - id: string (required, 1-100 chars)
+    //   - userId: string (required, immutable, matches Auth UID)
+    //   - blockId: string (optional, max 100 chars)
+    //   - content: string (max 100,000 chars)
+    //   - updated_at: timestamp (recent)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isRequestUserOwner() {
+      return isAuthenticated() && request.auth.uid == request.resource.data.userId;
+    }
+
+    function isRecent(time) {
+      return time is timestamp &&
+             time > request.time - duration.value(5, 'm') &&
+             time <= request.time + duration.value(1, 'm');
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidUserDoc(data) {
+      return data.keys().hasAll(['uid', 'name', 'workspaceName']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.workspaceName is string && data.workspaceName.size() > 0 && data.workspaceName.size() <= 100 &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 150)) &&
+             (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() <= 30)) &&
+             (!('role' in data) || data.role in ['admin', 'manager', 'member', 'guest']) &&
+             (!('jobTitle' in data) || (data.jobTitle is string && data.jobTitle.size() <= 100)) &&
+             (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 500)) &&
+             (!('workHours' in data) || (data.workHours is string && data.workHours.size() <= 50)) &&
+             (!('soundEnabled' in data) || data.soundEnabled is bool) &&
+             (!('defaultSprintMins' in data) || (data.defaultSprintMins is number && data.defaultSprintMins > 0 && data.defaultSprintMins <= 180));
+    }
+
+    function isValidDailyBlock(data) {
+      return data.keys().hasAll(['id', 'userId', 'date', 'title', 'type']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.date is string && data.date.size() == 10 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.type in ['focus', 'scratchpad', 'links', 'tasks', 'metric', 'routine'] &&
+             (!('config' in data) || data.config is map) &&
+             (!('items' in data) || (data.items is list && data.items.size() <= 100)) &&
+             (!('order_index' in data) || (data.order_index is number && data.order_index >= 0));
+    }
+
+    function isValidRoutine(data) {
+      return data.keys().hasAll(['id', 'userId', 'title']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+             (!('blocks' in data) || (data.blocks is list && data.blocks.size() <= 50));
+    }
+
+    function isValidScratchpad(data) {
+      return data.keys().hasAll(['id', 'userId', 'content']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 100 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.content is string && data.content.size() <= 100000;
+    }
+
+    // ===============================================================
+    // Collection Security Rules
+    // ===============================================================
+
+    // 1. Users collection (Locked strictly to the authenticated owner)
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserDoc(request.resource.data);
+      allow update: if isOwner(userId) &&
+                       isValidUserDoc(request.resource.data) &&
+                       request.resource.data.uid == resource.data.uid;
+      allow delete: if isOwner(userId);
+    }
+
+    // 2. Daily Blocks (User workspace items)
+    match /daily_blocks/{blockId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isRequestUserOwner() && isValidDailyBlock(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() &&
+                       isRequestUserOwner() &&
+                       isValidDailyBlock(request.resource.data) &&
+                       request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    // 3. Saved Routines
+    match /routines/{routineId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isRequestUserOwner() && isValidRoutine(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() &&
+                       isRequestUserOwner() &&
+                       isValidRoutine(request.resource.data) &&
+                       request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    // 4. Scratchpads
+    match /scratchpads/{scratchpadId} {
+      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isRequestUserOwner() && isValidScratchpad(request.resource.data);
+      allow update: if isAuthenticated() && isDocOwner() &&
+                       isRequestUserOwner() &&
+                       isValidScratchpad(request.resource.data) &&
+                       request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && isDocOwner();
+    }
+
+    // Default deny for any unhandled routes
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
