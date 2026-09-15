@@ -77,7 +77,7 @@ export default function LoginPage() {
 
       if (res.success) {
         setSuccessMessage(`Signed in as ${targetName} (${targetEmail}) via Google! Redirecting...`);
-        setTimeout(() => router.push("/"), 600);
+        setTimeout(() => router.replace("/"), 300);
       } else {
         setErrorMessage(res.error || "Failed to complete Google authentication.");
       }
@@ -94,7 +94,7 @@ export default function LoginPage() {
       const oauthRes = await loginWithOAuth("microsoft");
       if (oauthRes.success) {
         setSuccessMessage("Microsoft authentication successful! Redirecting...");
-        setTimeout(() => router.push("/"), 600);
+        setTimeout(() => router.replace("/"), 300);
         return;
       }
     } catch (e) {}
@@ -111,7 +111,7 @@ export default function LoginPage() {
 
       if (res.success) {
         setSuccessMessage(`Signed in as ${targetName} (${targetEmail}) via Microsoft! Redirecting...`);
-        setTimeout(() => router.push("/"), 600);
+        setTimeout(() => router.replace("/"), 300);
       } else {
         setErrorMessage(res.error || "Failed to complete Microsoft authentication.");
       }
@@ -171,7 +171,7 @@ export default function LoginPage() {
 
       if (res.success) {
         setSuccessMessage("Account created successfully! Redirecting...");
-        setTimeout(() => router.push("/"), 800);
+        setTimeout(() => router.replace("/"), 300);
       } else {
         setErrorMessage(res.error || "Failed to create account.");
       }
@@ -182,7 +182,7 @@ export default function LoginPage() {
 
       if (res.success) {
         setSuccessMessage("Signed in successfully! Redirecting...");
-        setTimeout(() => router.push("/"), 800);
+        setTimeout(() => router.replace("/"), 300);
       } else {
         setErrorMessage(res.error || "Invalid credentials. Please verify your email and password.");
       }
