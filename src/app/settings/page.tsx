@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { setSoundEnabled as setGlobalSoundEnabled } from "@/lib/sound";
-import { detectModelsFromApiKey, sendAIChatRequest } from "@/lib/ai";
+import { detectModelsFromApiKey, detectOllamaModels, sendAIChatRequest } from "@/lib/ai";
 import { 
   User, 
   Settings, 
@@ -122,28 +122,29 @@ export default function EmployeeSettingsPage() {
     }
   }, [aiModel, updateAIConfig]);
 
+  const [isOllamaRunning, setIsOllamaRunning] = useState<boolean | null>(null);
+
   // Scan Local Ollama Models
   const fetchOllamaModels = async () => {
     setIsDetecting(true);
     try {
-      const res = await fetch("http://127.0.0.1:11434/api/tags").catch(() => null);
-      if (res && res.ok) {
-        const data = await res.json();
-        if (data.models && Array.isArray(data.models) && data.models.length > 0) {
-          const names = data.models.map((m: any) => m.name.split(":")[0]);
-          setDetectedModels(names);
-          setDetectedProviderName("Local Ollama");
-          if (!aiModel || !names.includes(aiModel)) {
-            setAiModel(names[0]);
-            updateAIConfig({ model: names[0] });
-          }
-          setIsDetecting(false);
-          return;
-        }
-      }
-      setDetectedModels(OLLAMA_PRESETS);
+      const result = await detectOllamaModels(aiBaseUrl);
+      setIsOllamaRunning(result.isConnected);
       setDetectedProviderName("Local Ollama");
+
+      if (result.isConnected && result.models.length > 0) {
+        setDetectedModels(result.models);
+        // If current model is empty, default or not installed, pick the first installed model
+        if (!aiModel || aiModel === "gpt-4o-mini" || (!result.models.includes(aiModel) && !result.models.includes(`${aiModel}:latest`))) {
+          const defaultOllama = result.models[0];
+          setAiModel(defaultOllama);
+          updateAIConfig({ model: defaultOllama });
+        }
+      } else {
+        setDetectedModels(OLLAMA_PRESETS);
+      }
     } catch (e) {
+      setIsOllamaRunning(false);
       setDetectedModels(OLLAMA_PRESETS);
       setDetectedProviderName("Local Ollama");
     } finally {
@@ -411,17 +412,30 @@ export default function EmployeeSettingsPage() {
             <div className="space-y-3 pt-2">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
-                    <Bot size={13} className="text-blue-500" />
-                    <span>Ollama Model Name</span>
-                  </label>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                      <Bot size={13} className="text-blue-500" />
+                      <span>Ollama Model Name</span>
+                    </label>
+                    {isOllamaRunning === true && (
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 flex items-center gap-1 animate-in fade-in">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>Ollama Running</span>
+                      </span>
+                    )}
+                    {isOllamaRunning === false && (
+                      <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 flex items-center gap-1 animate-in fade-in">
+                        <span>Not Running</span>
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={fetchOllamaModels}
-                    className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:underline font-semibold"
+                    className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:underline font-semibold cursor-pointer"
                   >
                     <RefreshCw size={11} className={isDetecting ? "animate-spin" : ""} />
-                    <span>Scan Local Models</span>
+                    <span>Scan Installed Models</span>
                   </button>
                 </div>
 
@@ -430,7 +444,7 @@ export default function EmployeeSettingsPage() {
                     <select
                       value={aiModel}
                       onChange={(e) => handleAIFieldChange("model", e.target.value)}
-                      className="sm:w-1/2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                      className="sm:w-1/2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 cursor-pointer shadow-2xs font-semibold text-blue-600 dark:text-blue-400"
                     >
                       {detectedModels.map((m) => (
                         <option key={m} value={m}>
@@ -443,26 +457,29 @@ export default function EmployeeSettingsPage() {
                     type="text"
                     value={aiModel}
                     onChange={(e) => handleAIFieldChange("model", e.target.value)}
-                    placeholder="e.g. llama3.2, deepseek-r1, qwen2.5, mistral"
+                    placeholder="e.g. llama3.2:latest, llama3.2, deepseek-r1"
                     className="flex-1 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 shadow-2xs"
                   />
                 </div>
 
                 {/* Quick Model Chips */}
                 <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                  <span className="text-[10px] text-slate-400 dark:text-zinc-500">Popular:</span>
-                  {OLLAMA_PRESETS.map((preset) => (
+                  <span className="text-[10px] text-slate-400 dark:text-zinc-500">
+                    {isOllamaRunning ? "Detected on PC:" : "Popular:"}
+                  </span>
+                  {detectedModels.map((preset) => (
                     <button
                       key={preset}
                       type="button"
                       onClick={() => handleAIFieldChange("model", preset)}
-                      className={`text-[10px] font-mono px-2 py-0.5 rounded-md border transition-all ${
-                        aiModel === preset
-                          ? "bg-blue-600 text-white border-blue-600"
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded-md border transition-all cursor-pointer flex items-center gap-1 ${
+                        aiModel === preset || aiModel === preset.split(":")[0]
+                          ? "bg-blue-600 text-white border-blue-600 font-bold shadow-xs"
                           : "bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-600"
                       }`}
                     >
-                      {preset}
+                      {isOllamaRunning && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+                      <span>{preset}</span>
                     </button>
                   ))}
                 </div>

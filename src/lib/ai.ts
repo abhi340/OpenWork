@@ -162,6 +162,38 @@ export async function detectModelsFromApiKey(apiKey: string, customBaseUrl = "")
   };
 }
 
+// Auto-detect installed local Ollama models across 127.0.0.1 and localhost
+export async function detectOllamaModels(customBaseUrl = ""): Promise<{
+  isConnected: boolean;
+  models: string[];
+  activeUrl: string;
+}> {
+  const candidateHosts = customBaseUrl
+    ? [customBaseUrl.replace(/\/+$/, "")]
+    : ["http://127.0.0.1:11434", "http://localhost:11434"];
+
+  for (const host of candidateHosts) {
+    try {
+      const res = await fetch(`${host}/api/tags`, { method: "GET" }).catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.models) && data.models.length > 0) {
+          const list: string[] = [];
+          for (const m of data.models) {
+            if (m.name && !list.includes(m.name)) list.push(m.name);
+            const shortName = m.name?.split(":")[0];
+            if (shortName && !list.includes(shortName)) list.push(shortName);
+          }
+          return { isConnected: true, models: list, activeUrl: host };
+        }
+        return { isConnected: true, models: [], activeUrl: host };
+      }
+    } catch (e) {}
+  }
+
+  return { isConnected: false, models: [], activeUrl: candidateHosts[0] };
+}
+
 // Universal Chat Execution (Direct Client API with resilient Edge Gateway fallback)
 export async function sendAIChatRequest(params: {
   provider?: string;
@@ -172,30 +204,71 @@ export async function sendAIChatRequest(params: {
 }): Promise<{ reply: string; error?: string }> {
   const { provider = "cloud", apiKey = "", baseUrl = "", model = "", messages } = params;
 
-  // A. Local Ollama Execution (Runs directly on local machine)
+  // A. Local Ollama Execution (Runs directly on user's local machine)
   if (provider === "ollama") {
-    const targetBase = (baseUrl || "http://127.0.0.1:11434").replace(/\/+$/, "");
-    const targetModel = model || "llama3.2";
+    const candidateHosts = baseUrl
+      ? [baseUrl.replace(/\/+$/, "")]
+      : ["http://127.0.0.1:11434", "http://localhost:11434"];
+    
+    const rawModel = (model || "").trim();
+    const candidateModels = [
+      rawModel,
+      rawModel && !rawModel.includes(":") ? `${rawModel}:latest` : "",
+      rawModel && rawModel.includes(":") ? rawModel.split(":")[0] : "",
+      "llama3.2:latest",
+      "llama3.2"
+    ].filter(Boolean);
 
-    try {
-      const res = await fetch(`${targetBase}/v1/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: targetModel,
-          messages: messages.map((m) => ({ role: m.role, content: m.content }))
-        })
-      });
+    for (const host of candidateHosts) {
+      for (const targetModel of candidateModels) {
+        // 1. Native Ollama /api/chat
+        try {
+          const res = await fetch(`${host}/api/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: targetModel,
+              messages: messages.map((m) => ({
+                role: m.role === "system" ? "system" : m.role === "assistant" ? "assistant" : "user",
+                content: m.content
+              })),
+              stream: false
+            })
+          });
 
-      if (!res.ok) {
-        return { reply: "", error: `Ollama error (${res.status}). Ensure Ollama is running at ${targetBase}` };
+          if (res.ok) {
+            const data = await res.json();
+            if (data.message?.content) {
+              return { reply: data.message.content };
+            }
+          }
+        } catch (e) {}
+
+        // 2. OpenAI-compatible /v1/chat/completions
+        try {
+          const res = await fetch(`${host}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: targetModel,
+              messages: messages.map((m) => ({ role: m.role, content: m.content }))
+            })
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            if (data.choices?.[0]?.message?.content) {
+              return { reply: data.choices[0].message.content };
+            }
+          }
+        } catch (e) {}
       }
-
-      const data = await res.json();
-      return { reply: data.choices?.[0]?.message?.content || "No reply generated." };
-    } catch (err: any) {
-      return { reply: "", error: `Could not connect to Local Ollama (${targetBase}). Is Ollama running on your machine?` };
     }
+
+    return {
+      reply: "",
+      error: `Could not connect to Local Ollama (${candidateHosts[0]}). Make sure Ollama is open and running on your PC.`
+    };
   }
 
   // B. Cloud AI Execution
