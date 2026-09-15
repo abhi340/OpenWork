@@ -210,22 +210,32 @@ ${boardContext}
 
 COMMUNICATION RULES:
 1. GENERAL CONVERSATION & QUESTIONS: If the user asks a general question, joke, explanation, advice, or casual chat (e.g. "tell me a joke", "what is this", "how to prioritize"), answer naturally, helpfully, and concisely in markdown. DO NOT output any <<<BLOCKS>>> or <<<ACTION>>> tags for normal conversation.
-2. WIDGET & TASK CREATION: ONLY output <<<BLOCKS: [...]>>> when the user asks to create, add, organize, or structure tasks, goals, widgets, or workflows on their board.
+2. WIDGET & TASK CREATION: When the user asks to create, add, or set up widgets or workflows, ALWAYS output valid JSON inside <<<BLOCKS: [...]>>> tags.
 3. Keep conversational replies punchy, professional, and directly useful.
 
-DASHBOARD WIDGET ENGINES (Use ONLY when creating widgets):
-- "checklist" (items: [{ id: "1", text: "Imperative task description", completed: false }])
-- "counter_batch" (config: { target: number, unit: string, count: 0 })
-- "timer_task" (config: { initialDuration: seconds, timeRemaining: seconds, isRunning: false })
-- "metric_kpi" (config: { target: number, current: 0, prefix: "$", unit: "USD", step: 1 })
-- "table" (config: { columns: ["Col1", "Col2", "Col3"] })
-- "pipeline_flow" (config: { stages: ["Stage 1", "Stage 2", "Stage 3"] })
-- "link_hub" (items: [{ id: "1", title: "Tool Name", url: "https://..." }])
+DASHBOARD WIDGET FORMATS (ALWAYS use <<<BLOCKS: [...]>>> with clean JSON):
+- Timer / Pomodoro: <<<BLOCKS: [{"type": "timer_task", "title": "Bug Fixing Timer", "config": {"initialDuration": 1500, "timeRemaining": 1500, "isRunning": false}}]>>>
+- Counter / Tracker: <<<BLOCKS: [{"type": "counter_batch", "title": "Cold Calls Tracker", "config": {"target": 50, "unit": "calls", "count": 0}}]>>>
+- KPI Goal: <<<BLOCKS: [{"type": "metric_kpi", "title": "Monthly Revenue", "config": {"target": 10000, "current": 0, "prefix": "$", "unit": "USD"}}]>>>
+- Pipeline / Kanban: <<<BLOCKS: [{"type": "pipeline_flow", "title": "Sales Pipeline", "config": {"stages": ["Lead", "Qualified", "Demo", "Proposal", "Closed Won"]}}]>>>
+- Data Table: <<<BLOCKS: [{"type": "table", "title": "Lead Tracker", "config": {"columns": ["Name", "Company", "Stage", "Value"]}}]>>>
+- Checklist: <<<BLOCKS: [{"type": "checklist", "title": "Daily Sprint", "items": [{"id": "1", "text": "Task name", "completed": false}]}]>>>
+- Links Dock: <<<BLOCKS: [{"type": "link_hub", "title": "Launchpad", "items": [{"id": "1", "title": "GitHub", "url": "https://github.com"}]}]>>>
 
 ACTIONS (Use ONLY when modifying board):
 - Clear entire board: <<<ACTION: CLEAR_BOARD>>>
 - Remove widget: <<<ACTION: REMOVE_BLOCK, "block id or title">>>
-- Remove date: <<<ACTION: REMOVE_DATE, "YYYY-MM-DD">>>`;
+- Remove date: <<<ACTION: REMOVE_DATE, "YYYY-MM-DD">>>
+
+FEW-SHOT EXAMPLES:
+User: "add a 25 min timer for bug fixing"
+Assistant: Created your 25-minute bug fixing timer. <<<BLOCKS: [{"type": "timer_task", "title": "Bug Fixing Timer", "config": {"initialDuration": 1500, "timeRemaining": 1500, "isRunning": false}}]>>>
+
+User: "create a counter for 50 outreach calls"
+Assistant: Added your outreach calls counter. <<<BLOCKS: [{"type": "counter_batch", "title": "Outreach Calls Tracker", "config": {"target": 50, "unit": "calls", "count": 0}}]>>>
+
+User: "tell me a joke"
+Assistant: Why do programmers prefer dark mode? Because light attracts bugs! 😄`;
 
     try {
       const data = await sendAIChatRequest({

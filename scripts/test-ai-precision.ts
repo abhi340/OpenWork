@@ -344,15 +344,72 @@ const testCases: TestCase[] = [
     }
   },
 
-  // Category 6: Tag Sanitization Under All Conditions
+  // Category 7: Local Model Pseudocode Resilience & Deterministic Fallback
   {
-    name: "Zero Tag Leakage with Mixed Formatting",
-    userPrompt: "can you help me plan today?",
-    modelOutput: "Sure! Let's get organized. <<<BLOCKS: []>>> Let me know your top priorities.",
+    name: "User Prompt Timer with Model Markdown Pseudocode (The Exact User Issue)",
+    userPrompt: "add a 25 min timer for bug fixing",
+    modelOutput: `Timer: Bug Fixing Session
+
+Config:
+\`\`\`markdown
+timer_task
+* config:
+  * initialDuration: 25m
+  * timeRemaining: 25m
+  * isRunning: false
+\`\`\`
+
+Start Timer
+To start the timer, simply say "Start bug fixing timer". Once you've completed the task, you can stop the timer by saying "Stop bug fixing timer".`,
     expected: {
-      hasBlocks: false,
-      hasAction: true, // Treated as clear board or clean reply
+      hasBlocks: true,
+      blockType: "timer_task",
+      expectedBlockCount: 1,
       cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
+    }
+  },
+  {
+    name: "Model Outputs Conversational Confirmation for Counter without Tags",
+    userPrompt: "add a counter for 50 outreach calls",
+    modelOutput: "I have created an outreach calls tracker targeting 50 calls for your sprint today.",
+    expected: {
+      hasBlocks: true,
+      blockType: "counter_batch",
+      expectedBlockCount: 1,
+      cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
+    }
+  },
+  {
+    name: "Model Outputs Conversational Confirmation for KPI without Tags",
+    userPrompt: "create a KPI goal for $10,000 monthly revenue",
+    modelOutput: "Configured your monthly revenue target goal for $10,000.",
+    expected: {
+      hasBlocks: true,
+      blockType: "metric_kpi",
+      expectedBlockCount: 1,
+      cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
+    }
+  },
+  {
+    name: "Model Hallucinates Config Keys Inside Checklist Items",
+    userPrompt: "create sprint checklist",
+    modelOutput: `<<<BLOCKS: [
+      {
+        "type": "checklist",
+        "title": "Engineering Sprint",
+        "items": [
+          "config:",
+          "initialDuration: 25m",
+          "Deploy hotfix to production",
+          "Verify telemetry charts"
+        ]
+      }
+    ]>>>`,
+    expected: {
+      hasBlocks: true,
+      blockType: "checklist",
+      expectedBlockCount: 1,
+      cleanContentShouldNotContain: ["config:", "initialDuration"]
     }
   }
 ];
