@@ -28,6 +28,7 @@ import {
 import { useAuth, AIConfig } from "@/context/AuthContext";
 import { useWorkspaceStore, BlockType } from "@/store/workspaceStore";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { sendAIChatRequest } from "@/lib/ai";
 import Link from "next/link";
 
 interface GeneratedBlock {
@@ -240,24 +241,18 @@ RESPONSE FORMAT:
 - If modifying/deleting: 1 sentence confirmation followed by <<<ACTION: ...>>> tag.`;
 
     try {
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: activeConfig.provider,
-          apiKey: activeConfig.apiKey,
-          baseUrl: activeConfig.baseUrl,
-          model: activeConfig.model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...updatedMessages.filter((m) => m.id !== "welcome").map((m) => ({ role: m.role, content: m.content }))
-          ]
-        })
+      const data = await sendAIChatRequest({
+        provider: activeConfig.provider,
+        apiKey: activeConfig.apiKey,
+        baseUrl: activeConfig.baseUrl,
+        model: activeConfig.model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...updatedMessages.filter((m) => m.id !== "welcome").map((m) => ({ role: m.role, content: m.content }))
+        ]
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
+      if (data.error) {
         setMessages((prev) => [
           ...prev,
           {

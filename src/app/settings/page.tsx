@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { setSoundEnabled as setGlobalSoundEnabled } from "@/lib/sound";
+import { detectModelsFromApiKey, sendAIChatRequest } from "@/lib/ai";
 import { 
   User, 
   Settings, 
@@ -12,27 +13,20 @@ import {
   Check, 
   Download, 
   FileUp, 
-  Trash2, 
-  Clock, 
   Volume2, 
   VolumeX, 
   ShieldCheck, 
   Sparkles, 
-  Command, 
-  Sun, 
-  Moon,
-  Laptop,
-  Image as ImageIcon,
-  Bot,
-  Key,
-  Globe,
-  Cpu,
-  Loader2,
-  CheckCircle2,
-  AlertCircle,
-  RefreshCw,
-  ChevronDown,
-  ChevronUp
+  Bot, 
+  Key, 
+  Cpu, 
+  Loader2, 
+  CheckCircle2, 
+  AlertCircle, 
+  RefreshCw, 
+  ChevronDown, 
+  ChevronUp,
+  Zap
 } from "lucide-react";
 
 const AVATAR_PRESETS = [
@@ -44,7 +38,6 @@ const AVATAR_PRESETS = [
 ];
 
 const OLLAMA_PRESETS = ["llama3.2", "deepseek-r1", "qwen2.5", "mistral", "phi3", "gemma2"];
-const CLOUD_PRESETS = ["gpt-4o-mini", "llama-3.3-70b-versatile", "gemini-2.0-flash", "deepseek-chat", "gpt-4o"];
 
 export default function EmployeeSettingsPage() {
   const { user, updateProfile, aiConfig, updateAIConfig } = useAuth();
@@ -60,7 +53,7 @@ export default function EmployeeSettingsPage() {
   const [soundEnabled, setSoundEnabled] = useState(user.soundEnabled ?? true);
   const [defaultSprintMins, setDefaultSprintMins] = useState(user.defaultSprintMins || 25);
 
-  // AI Config states: provider is either "ollama" or "cloud" (or legacy names)
+  // AI Config states: provider is either "ollama" or "cloud"
   const isInitialOllama = aiConfig.provider === "ollama";
   const [aiProvider, setAiProvider] = useState<"ollama" | "cloud">(isInitialOllama ? "ollama" : "cloud");
   const [aiApiKey, setAiApiKey] = useState(aiConfig.apiKey || "");
@@ -68,9 +61,10 @@ export default function EmployeeSettingsPage() {
   const [aiModel, setAiModel] = useState(aiConfig.model || (isInitialOllama ? "llama3.2" : "gpt-4o-mini"));
   const [showAdvancedUrl, setShowAdvancedUrl] = useState(Boolean(aiConfig.baseUrl && !aiConfig.baseUrl.includes("127.0.0.1")));
 
-  // Available models from local Ollama
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  // Auto-detected Cloud & Ollama Models
+  const [detectedProviderName, setDetectedProviderName] = useState<string>("");
+  const [detectedModels, setDetectedModels] = useState<string[]>([]);
+  const [isDetecting, setIsDetecting] = useState(false);
 
   const [isTestingAI, setIsTestingAI] = useState(false);
   const [aiTestResult, setAiTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -99,35 +93,70 @@ export default function EmployeeSettingsPage() {
     reader.readAsDataURL(file);
   };
 
-  // Auto-fetch available models from local Ollama
-  const fetchAvailableModels = async () => {
-    if (aiProvider !== "ollama") return;
-    setIsLoadingModels(true);
+  // Trigger Model Auto-Detection when API key changes
+  const runAutoDetection = useCallback(async (key: string, url = "") => {
+    if (!key || key.trim().length < 6) {
+      setDetectedModels([]);
+      setDetectedProviderName("");
+      return;
+    }
+
+    setIsDetecting(true);
+    try {
+      const result = await detectModelsFromApiKey(key, url);
+      setDetectedProviderName(result.providerName);
+      setDetectedModels(result.models);
+
+      // Auto-select the first high-performance model if current model is empty or default
+      if (result.models.length > 0) {
+        if (!aiModel || aiModel === "gpt-4o-mini" || !result.models.includes(aiModel)) {
+          const defaultChoice = result.models[0];
+          setAiModel(defaultChoice);
+          updateAIConfig({ model: defaultChoice });
+        }
+      }
+    } catch (e) {
+      console.warn("Auto-detect models error:", e);
+    } finally {
+      setIsDetecting(false);
+    }
+  }, [aiModel, updateAIConfig]);
+
+  // Scan Local Ollama Models
+  const fetchOllamaModels = async () => {
+    setIsDetecting(true);
     try {
       const res = await fetch("http://127.0.0.1:11434/api/tags").catch(() => null);
       if (res && res.ok) {
         const data = await res.json();
-        if (data.models && Array.isArray(data.models)) {
+        if (data.models && Array.isArray(data.models) && data.models.length > 0) {
           const names = data.models.map((m: any) => m.name.split(":")[0]);
-          setAvailableModels(names);
-          if (names.length > 0 && !names.includes(aiModel)) {
+          setDetectedModels(names);
+          setDetectedProviderName("Local Ollama");
+          if (!aiModel || !names.includes(aiModel)) {
             setAiModel(names[0]);
             updateAIConfig({ model: names[0] });
           }
+          setIsDetecting(false);
           return;
         }
       }
-      setAvailableModels([]);
+      setDetectedModels(OLLAMA_PRESETS);
+      setDetectedProviderName("Local Ollama");
     } catch (e) {
-      setAvailableModels([]);
+      setDetectedModels(OLLAMA_PRESETS);
+      setDetectedProviderName("Local Ollama");
     } finally {
-      setIsLoadingModels(false);
+      setIsDetecting(false);
     }
   };
 
+  // Run detection on mount / provider switch
   useEffect(() => {
     if (aiProvider === "ollama") {
-      fetchAvailableModels();
+      fetchOllamaModels();
+    } else if (aiApiKey) {
+      runAutoDetection(aiApiKey, aiBaseUrl);
     }
   }, [aiProvider]);
 
@@ -141,7 +170,7 @@ export default function EmployeeSettingsPage() {
     if (aiConfig.baseUrl !== undefined) setAiBaseUrl(aiConfig.baseUrl);
   }, [aiConfig]);
 
-  // Update AI setting instantly and notify store
+  // Handle field change and trigger auto-detect
   const handleAIFieldChange = (field: "provider" | "apiKey" | "baseUrl" | "model", value: any) => {
     if (field === "provider") {
       setAiProvider(value);
@@ -157,9 +186,20 @@ export default function EmployeeSettingsPage() {
         }
       }
     }
-    if (field === "apiKey") setAiApiKey(value);
-    if (field === "baseUrl") setAiBaseUrl(value);
-    if (field === "model") setAiModel(value);
+
+    if (field === "apiKey") {
+      setAiApiKey(value);
+      runAutoDetection(value, aiBaseUrl);
+    }
+
+    if (field === "baseUrl") {
+      setAiBaseUrl(value);
+      if (aiApiKey) runAutoDetection(aiApiKey, value);
+    }
+
+    if (field === "model") {
+      setAiModel(value);
+    }
 
     updateAIConfig({ [field]: value });
   };
@@ -187,11 +227,12 @@ export default function EmployeeSettingsPage() {
     setTimeout(() => setSavedSuccess(false), 2500);
   };
 
+  // Test AI Connection via Universal AI Client
   const testAIConnection = async () => {
     setIsTestingAI(true);
     setAiTestResult(null);
 
-    // Save active config immediately
+    // Persist active settings
     updateAIConfig({
       provider: aiProvider,
       apiKey: aiApiKey,
@@ -199,33 +240,26 @@ export default function EmployeeSettingsPage() {
       model: aiModel
     });
 
-    try {
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: aiProvider,
-          apiKey: aiApiKey,
-          baseUrl: aiProvider === "ollama" ? "http://127.0.0.1:11434" : aiBaseUrl,
-          model: aiModel,
-          messages: [{ role: "user", content: "Say 'AI Copilot Connected!' in 3 words." }]
-        })
-      });
+    const res = await sendAIChatRequest({
+      provider: aiProvider,
+      apiKey: aiApiKey,
+      baseUrl: aiProvider === "ollama" ? "http://127.0.0.1:11434" : aiBaseUrl,
+      model: aiModel,
+      messages: [{ role: "user", content: "Respond with 'AI Copilot Connected!' in exactly 3 words." }]
+    });
 
-      const data = await res.json();
-      if (data.error) {
-        setAiTestResult({ success: false, message: data.error });
-      } else {
-        setAiTestResult({ success: true, message: `Connected successfully! Response: "${data.reply}"` });
-      }
-    } catch (err: any) {
-      setAiTestResult({ success: false, message: `Connection error: ${err.message}` });
-    } finally {
-      setIsTestingAI(false);
+    if (res.error) {
+      setAiTestResult({ success: false, message: res.error });
+    } else {
+      setAiTestResult({
+        success: true,
+        message: `Connected successfully! Response: "${res.reply.trim()}"`
+      });
     }
+    setIsTestingAI(false);
   };
 
-  // Export full workspace as JSON (Security: Strip private API keys)
+  // Export full workspace as JSON
   const exportWorkspaceBackup = () => {
     const sanitizedAIConfig = {
       ...aiConfig,
@@ -257,12 +291,8 @@ export default function EmployeeSettingsPage() {
     reader.onload = async (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
-        if (parsed.profile) {
-          updateProfile(parsed.profile);
-        }
-        if (parsed.aiConfig) {
-          updateAIConfig(parsed.aiConfig);
-        }
+        if (parsed.profile) updateProfile(parsed.profile);
+        if (parsed.aiConfig) updateAIConfig(parsed.aiConfig);
         if (parsed.blocks && Array.isArray(parsed.blocks)) {
           for (const b of parsed.blocks) {
             await addBlock({
@@ -315,7 +345,7 @@ export default function EmployeeSettingsPage() {
           </div>
 
           <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Choose between 100% free Local Ollama (private & offline) or connect any Cloud AI model with your API key.
+            Choose between 100% free Local Ollama (private & offline) or enter any Cloud AI API key with automatic model detection.
           </p>
 
           {/* 2 Simple Mode Selector Cards */}
@@ -364,20 +394,20 @@ export default function EmployeeSettingsPage() {
                   </div>
                   <div>
                     <div className="text-xs font-bold text-slate-900 dark:text-zinc-100">Cloud AI Model</div>
-                    <div className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold">Any API Key & Model</div>
+                    <div className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold">Any API Key & Auto-Detected Models</div>
                   </div>
                 </div>
                 {aiProvider === "cloud" && <CheckCircle2 size={16} className="text-blue-600 dark:text-blue-400" />}
               </div>
               <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                Works with OpenAI, Groq, NVIDIA, Google Gemini, DeepSeek, OpenRouter, or custom APIs.
+                Works with OpenAI, Groq, NVIDIA NIM, Google Gemini, DeepSeek, OpenRouter, or custom APIs.
               </p>
             </button>
           </div>
 
-          {/* Configuration Inputs based on mode */}
+          {/* Configuration Inputs */}
           {aiProvider === "ollama" ? (
-            /* Mode 1: Local Ollama Settings (Only 1 input: Model Name) */
+            /* Mode 1: Local Ollama (Model Name + Scan) */
             <div className="space-y-3 pt-2">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
@@ -387,28 +417,28 @@ export default function EmployeeSettingsPage() {
                   </label>
                   <button
                     type="button"
-                    onClick={fetchAvailableModels}
-                    className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:underline"
+                    onClick={fetchOllamaModels}
+                    className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:underline font-semibold"
                   >
-                    <RefreshCw size={11} className={isLoadingModels ? "animate-spin" : ""} />
-                    <span>Scan Installed Models</span>
+                    <RefreshCw size={11} className={isDetecting ? "animate-spin" : ""} />
+                    <span>Scan Local Models</span>
                   </button>
                 </div>
 
-                <div className="flex gap-2">
-                  {availableModels.length > 0 ? (
+                <div className="flex flex-col sm:flex-row gap-2">
+                  {detectedModels.length > 0 && (
                     <select
                       value={aiModel}
                       onChange={(e) => handleAIFieldChange("model", e.target.value)}
-                      className="flex-1 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                      className="sm:w-1/2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
                     >
-                      {availableModels.map((m) => (
+                      {detectedModels.map((m) => (
                         <option key={m} value={m}>
                           {m}
                         </option>
                       ))}
                     </select>
-                  ) : null}
+                  )}
                   <input
                     type="text"
                     value={aiModel}
@@ -439,58 +469,103 @@ export default function EmployeeSettingsPage() {
               </div>
             </div>
           ) : (
-            /* Mode 2: Cloud AI (Exactly 2 Fields: API Key & Model Name) */
+            /* Mode 2: Cloud AI (Exactly 2 Fields: API Key & Model Name with Auto-Detection) */
             <div className="space-y-4 pt-2">
               {/* Field 1: API Key */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
-                  <Key size={13} className="text-purple-500" />
-                  <span>AI Provider API Key</span>
-                </label>
-                <input
-                  type="password"
-                  value={aiApiKey}
-                  onChange={(e) => handleAIFieldChange("apiKey", e.target.value)}
-                  placeholder="Paste your API key (sk-..., gsk_..., nvapi-..., AIzaSy..., etc.)"
-                  className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 shadow-2xs"
-                />
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                    <Key size={13} className="text-purple-500" />
+                    <span>AI Provider API Key</span>
+                  </label>
+
+                  {/* Auto-detected Provider Badge */}
+                  {detectedProviderName && (
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 flex items-center gap-1 animate-in fade-in">
+                      <Zap size={10} className="text-purple-500" />
+                      <span>{detectedProviderName}</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="relative">
+                  <input
+                    type="password"
+                    value={aiApiKey}
+                    onChange={(e) => handleAIFieldChange("apiKey", e.target.value)}
+                    placeholder="Paste any API key (sk-..., gsk_..., nvapi-..., AIzaSy..., sk-or-...)"
+                    className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 shadow-2xs pr-10"
+                  />
+                  {isDetecting && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <Loader2 size={14} className="animate-spin text-purple-500" />
+                    </div>
+                  )}
+                </div>
                 <p className="text-[10px] text-slate-400 dark:text-zinc-500">
-                  Keys are stored encrypted locally on your browser and never logged.
+                  Enter your key — models are automatically detected and populated below.
                 </p>
               </div>
 
-              {/* Field 2: Model Name */}
+              {/* Field 2: Auto-Detected Model Selector & Input */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
-                  <Bot size={13} className="text-blue-500" />
-                  <span>Model Name</span>
-                </label>
-                <input
-                  type="text"
-                  value={aiModel}
-                  onChange={(e) => handleAIFieldChange("model", e.target.value)}
-                  placeholder="e.g. gpt-4o-mini, llama-3.3-70b-versatile, gemini-2.0-flash, deepseek-chat"
-                  className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 shadow-2xs"
-                />
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                    <Bot size={13} className="text-blue-500" />
+                    <span>Model Name</span>
+                  </label>
 
-                {/* Quick Model Chips */}
-                <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                  <span className="text-[10px] text-slate-400 dark:text-zinc-500">Suggestions:</span>
-                  {CLOUD_PRESETS.map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => handleAIFieldChange("model", preset)}
-                      className={`text-[10px] font-mono px-2 py-0.5 rounded-md border transition-all ${
-                        aiModel === preset
-                          ? "bg-purple-600 text-white border-purple-600"
-                          : "bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-600"
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
+                  {detectedModels.length > 0 && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                      <CheckCircle2 size={11} />
+                      <span>{detectedModels.length} Models Available</span>
+                    </span>
+                  )}
                 </div>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  {detectedModels.length > 0 && (
+                    <select
+                      value={aiModel}
+                      onChange={(e) => handleAIFieldChange("model", e.target.value)}
+                      className="sm:w-1/2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 cursor-pointer shadow-2xs font-semibold text-blue-600 dark:text-blue-400"
+                    >
+                      {detectedModels.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <input
+                    type="text"
+                    value={aiModel}
+                    onChange={(e) => handleAIFieldChange("model", e.target.value)}
+                    placeholder="e.g. gpt-4o-mini, llama-3.3-70b-versatile, gemini-2.0-flash, deepseek-chat"
+                    className="flex-1 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 shadow-2xs"
+                  />
+                </div>
+
+                {/* Quick Model Suggestion Chips */}
+                {detectedModels.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[10px] text-slate-400 dark:text-zinc-500">Auto-detected:</span>
+                    {detectedModels.slice(0, 6).map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => handleAIFieldChange("model", preset)}
+                        className={`text-[10px] font-mono px-2 py-0.5 rounded-md border transition-all ${
+                          aiModel === preset
+                            ? "bg-purple-600 text-white border-purple-600 font-semibold"
+                            : "bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-600"
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
 
               {/* Expandable Optional Custom Base URL */}
@@ -498,7 +573,7 @@ export default function EmployeeSettingsPage() {
                 <button
                   type="button"
                   onClick={() => setShowAdvancedUrl(!showAdvancedUrl)}
-                  className="text-[11px] text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-300 flex items-center gap-1 font-semibold"
+                  className="text-[11px] text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-300 flex items-center gap-1 font-semibold cursor-pointer"
                 >
                   {showAdvancedUrl ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                   <span>Advanced: Custom API Endpoint / Proxy (Optional)</span>
@@ -514,7 +589,7 @@ export default function EmployeeSettingsPage() {
                       className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"
                     />
                     <p className="text-[10px] text-slate-400 dark:text-zinc-500">
-                      Leave blank to auto-detect endpoint from your key format.
+                      Leave blank to auto-route from your API key.
                     </p>
                   </div>
                 )}
@@ -528,7 +603,7 @@ export default function EmployeeSettingsPage() {
               type="button"
               onClick={testAIConnection}
               disabled={isTestingAI}
-              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors disabled:opacity-50 shadow-2xs"
+              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors disabled:opacity-50 shadow-2xs cursor-pointer"
             >
               {isTestingAI ? (
                 <>
@@ -549,7 +624,7 @@ export default function EmployeeSettingsPage() {
                   aiTestResult.success ? "text-emerald-600 dark:text-emerald-400" : "text-red-500"
                 }`}
               >
-                {aiTestResult.success ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                {aiTestResult.success ? <CheckCircle2 size={14} /> : <AlertCircle size={14} className="flex-shrink-0" />}
                 <span className="truncate max-w-md">{aiTestResult.message}</span>
               </div>
             )}
@@ -610,7 +685,7 @@ export default function EmployeeSettingsPage() {
                 <button
                   type="button"
                   onClick={() => avatarFileInputRef.current?.click()}
-                  className="px-3 py-1.5 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                  className="px-3 py-1.5 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <Upload size={13} />
                   <span>Upload</span>
@@ -707,7 +782,7 @@ export default function EmployeeSettingsPage() {
                   setSoundEnabled(next);
                   setGlobalSoundEnabled(next);
                 }}
-                className={`p-2 rounded-xl transition-colors ${
+                className={`p-2 rounded-xl transition-colors cursor-pointer ${
                   soundEnabled
                     ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400"
                     : "bg-slate-200 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400"
@@ -733,7 +808,7 @@ export default function EmployeeSettingsPage() {
                     key={mins}
                     type="button"
                     onClick={() => setDefaultSprintMins(mins)}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
+                    className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                       defaultSprintMins === mins
                         ? "bg-blue-600 text-white"
                         : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:bg-slate-300 dark:hover:bg-zinc-700"
@@ -761,7 +836,7 @@ export default function EmployeeSettingsPage() {
             <button
               type="button"
               onClick={exportWorkspaceBackup}
-              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-2xs"
+              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-2xs cursor-pointer"
             >
               <Download size={14} className="text-amber-500" />
               <span>Export JSON Backup</span>
@@ -770,7 +845,7 @@ export default function EmployeeSettingsPage() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-2xs"
+              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-2xs cursor-pointer"
             >
               <FileUp size={14} className="text-blue-500" />
               <span>Import & Restore</span>
@@ -807,7 +882,7 @@ export default function EmployeeSettingsPage() {
             )}
             <button
               type="submit"
-              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
+              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer"
             >
               <span>Save Changes</span>
             </button>

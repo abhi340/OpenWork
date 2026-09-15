@@ -21,6 +21,7 @@ import {
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { useAuth } from "@/context/AuthContext";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { sendAIChatRequest } from "@/lib/ai";
 
 interface DailySummaryModalProps {
   isOpen: boolean;
@@ -244,28 +245,23 @@ export function DailySummaryModal({ isOpen, onClose }: DailySummaryModalProps) {
   const handleAIPolish = async () => {
     setIsPolishing(true);
     try {
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: aiConfig.provider,
-          apiKey: aiConfig.apiKey,
-          baseUrl: aiConfig.baseUrl,
-          model: aiConfig.model,
-          messages: [
-            {
-              role: "system",
-              content: "You are an executive communications director. Rewrite the user's raw daily tasks into an authoritative, punchy, high-impact executive summary. Keep metrics quantified, eliminate fluff, and use clean markdown bullet points."
-            },
-            {
-              role: "user",
-              content: `Please elevate this ${activeFormat.toUpperCase()} update for executive leadership:\n\n${rawActiveText}`
-            }
-          ]
-        })
+      const data = await sendAIChatRequest({
+        provider: aiConfig.provider,
+        apiKey: aiConfig.apiKey,
+        baseUrl: aiConfig.baseUrl,
+        model: aiConfig.model,
+        messages: [
+          {
+            role: "system",
+            content: "You are an executive communications director. Rewrite the user's raw daily tasks into an authoritative, punchy, high-impact executive summary. Keep metrics quantified, eliminate fluff, and use clean markdown bullet points."
+          },
+          {
+            role: "user",
+            content: `Please elevate this ${activeFormat.toUpperCase()} update for executive leadership:\n\n${rawActiveText}`
+          }
+        ]
       });
 
-      const data = await res.json();
       if (data.reply) {
         setAiPolishedText(data.reply);
       }

@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useWorkspaceStore, BlockType } from "@/store/workspaceStore";
 import { useAuth } from "@/context/AuthContext";
+import { sendAIChatRequest } from "@/lib/ai";
 import { CounterBlock } from "./CounterBlock";
 import { TimerBlock } from "./TimerBlock";
 import { TableBlock } from "./TableBlock";
@@ -139,18 +140,15 @@ export function CustomBlockModal({ isOpen, onClose }: CustomBlockModalProps) {
 
     setIsGeneratingWithAI(true);
     try {
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: aiConfig.provider,
-          apiKey: aiConfig.apiKey,
-          baseUrl: aiConfig.baseUrl,
-          model: aiConfig.model,
-          messages: [
-            {
-              role: "system",
-              content: `You are an expert workspace architect. The user will describe a widget or workflow engine.
+      const data = await sendAIChatRequest({
+        provider: aiConfig.provider,
+        apiKey: aiConfig.apiKey,
+        baseUrl: aiConfig.baseUrl,
+        model: aiConfig.model,
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert workspace architect. The user will describe a widget or workflow engine.
 Respond ONLY with a valid JSON object matching this schema, no surrounding conversational markdown:
 {
   "type": "counter_batch" | "timer_task" | "table" | "checklist" | "pipeline_flow" | "metric_kpi" | "link_hub",
@@ -163,16 +161,14 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
   "columns": string[] (optional for table),
   "stages": string[] (optional for pipeline)
 }`
-            },
-            {
-              role: "user",
-              content: aiPrompt
-            }
-          ]
-        })
+          },
+          {
+            role: "user",
+            content: aiPrompt
+          }
+        ]
       });
 
-      const data = await res.json();
       if (data.reply) {
         // Extract JSON from response
         const jsonMatch = data.reply.match(/\{[\s\S]*\}/);

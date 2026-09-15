@@ -4,6 +4,7 @@ import React, { useState, useMemo } from "react";
 import Link from "next/link";
 import { useAuth, UserRole } from "@/context/AuthContext";
 import { useWorkspaceStore } from "@/store/workspaceStore";
+import { sendAIChatRequest } from "@/lib/ai";
 import { 
   ShieldCheck, 
   Users, 
@@ -136,25 +137,20 @@ export default function AdminPanel() {
     setIsTestingAIChat(true);
     setAiChatResult(null);
     try {
-      const res = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: aiConfig.provider,
-          apiKey: aiConfig.apiKey,
-          baseUrl: aiConfig.baseUrl,
-          model: aiConfig.model,
-          messages: [{ role: "user", content: "Ping test" }]
-        })
+      const data = await sendAIChatRequest({
+        provider: aiConfig.provider,
+        apiKey: aiConfig.apiKey,
+        baseUrl: aiConfig.baseUrl,
+        model: aiConfig.model,
+        messages: [{ role: "user", content: "Ping test" }]
       });
-      const data = await res.json();
-      if (res.ok) {
-        setAiChatResult({ success: true, message: `AI Service Live! Provider: ${aiConfig.provider} (${aiConfig.model})` });
+      if (data.error) {
+        setAiChatResult({ success: false, message: data.error });
       } else {
-        setAiChatResult({ success: false, message: data.error || "AI Service connection failed." });
+        setAiChatResult({ success: true, message: `AI Service Live! Provider: ${aiConfig.provider} (${aiConfig.model})` });
       }
     } catch (e: any) {
-      setAiChatResult({ success: false, message: `Network error: ${e.message}` });
+      setAiChatResult({ success: false, message: `Connection error: ${e.message}` });
     } finally {
       setIsTestingAIChat(false);
     }
