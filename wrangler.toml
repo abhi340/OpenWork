@@ -6,7 +6,6 @@ pages_build_output_dir = "out"
 
 [assets]
 directory = "./out"
-binding = "ASSETS"
 
 # Cloudflare D1 Database Binding
 [[d1_databases]]
