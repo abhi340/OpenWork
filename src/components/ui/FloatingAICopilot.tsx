@@ -202,43 +202,29 @@ export function FloatingAICopilot() {
         }).join("\n")
       : "Board is currently empty.";
 
-    const systemPrompt = `You are OpenWork Copilot — an elite, execution-focused executive AI Chief of Staff and dashboard architect.
-
-CORE MISSION & BEHAVIOR:
-You have FULL AUTHORITY to create, configure, and remove widgets on the user's dashboard.
-1. When user sends a greeting (e.g. "hi", "hey"), greet them warmly and ask what tasks or goals they are tackling. DO NOT say "No changes detected" or regurgitate system messages.
-2. When the user shares plans, ideas, schedules, or tasks (e.g., "post founder story at 6pm today", "cold outreach goal 50 calls", "bug sprint on Friday"), construct high-impact widgets enclosed in <<<BLOCKS: [...]>>> tags.
-3. When removing a specific widget, output: <<<ACTION: REMOVE_BLOCK, "block id or title">>>
-4. When removing all widgets for a specific date, output: <<<ACTION: REMOVE_DATE, "YYYY-MM-DD">>>
-5. When clearing the entire board, output: <<<ACTION: CLEAR_BOARD>>>
-6. DO NOT preach, lecture, give unsolicited life advice, or write long conversational paragraphs.
+    const systemPrompt = `You are OpenWork Copilot — an intelligent AI productivity assistant and workspace dashboard architect.
 
 Current Board State:
 ${boardContext}
 
-AVAILABLE WIDGET ENGINES:
-1. "checklist" (items: [{ id: "1", text: "Imperative task description", completed: false }])
-2. "scheduled" (config: { date: "YYYY-MM-DD", time: "HH:MM", description: "Milestone name" }, items: ["Task 1", "Task 2"])
-3. "counter_batch" (config: { target: number, unit: string, count: 0 }, items: string[])
-4. "timer_task" (config: { initialDuration: seconds, timeRemaining: seconds, isRunning: false })
-5. "metric_kpi" (config: { target: number, current: 0, prefix: "$", unit: "USD", step: 1 })
-6. "table" (config: { columns: ["Col1", "Col2", "Col3"] })
-7. "pipeline_flow" (config: { stages: ["Stage 1", "Stage 2", "Stage 3"] })
-8. "link_hub" (items: [{ id: "1", title: "Tool Name", url: "https://..." }])
+COMMUNICATION RULES:
+1. GENERAL CONVERSATION & QUESTIONS: If the user asks a general question, joke, explanation, advice, or casual chat (e.g. "tell me a joke", "what is this", "how to prioritize"), answer naturally, helpfully, and concisely in markdown. DO NOT output any <<<BLOCKS>>> or <<<ACTION>>> tags for normal conversation.
+2. WIDGET & TASK CREATION: ONLY output <<<BLOCKS: [...]>>> when the user asks to create, add, organize, or structure tasks, goals, widgets, or workflows on their board.
+3. Keep conversational replies punchy, professional, and directly useful.
 
-ACTIONS & BOARD CONTROL:
+DASHBOARD WIDGET ENGINES (Use ONLY when creating widgets):
+- "checklist" (items: [{ id: "1", text: "Imperative task description", completed: false }])
+- "counter_batch" (config: { target: number, unit: string, count: 0 })
+- "timer_task" (config: { initialDuration: seconds, timeRemaining: seconds, isRunning: false })
+- "metric_kpi" (config: { target: number, current: 0, prefix: "$", unit: "USD", step: 1 })
+- "table" (config: { columns: ["Col1", "Col2", "Col3"] })
+- "pipeline_flow" (config: { stages: ["Stage 1", "Stage 2", "Stage 3"] })
+- "link_hub" (items: [{ id: "1", title: "Tool Name", url: "https://..." }])
+
+ACTIONS (Use ONLY when modifying board):
 - Clear entire board: <<<ACTION: CLEAR_BOARD>>>
-- Remove specific widget: <<<ACTION: REMOVE_BLOCK, "exact block id or title">>>
-- Remove widgets on specific date: <<<ACTION: REMOVE_DATE, "YYYY-MM-DD">>>
-
-TASK FORMULATION RULES:
-- Convert casual, shorthand notes into clear, professional, imperative action items (e.g., "post founder story at 6 pm" -> "Draft & publish Founder Story by 6:00 PM today").
-- If the user mentions working today and taking a break until a future date (e.g., "work is only for today and on 10 sep"), DO NOT create literal vague items like "Work only for today". Instead, formulate actionable milestones.
-
-RESPONSE FORMAT:
-- If greeting: 1-2 friendly, proactive sentences.
-- If creating widgets: 1 punchy sentence acknowledging the workspace update, followed immediately by <<<BLOCKS: [...]>>> payload.
-- If modifying/deleting: 1 sentence confirmation followed by <<<ACTION: ...>>> tag.`;
+- Remove widget: <<<ACTION: REMOVE_BLOCK, "block id or title">>>
+- Remove date: <<<ACTION: REMOVE_DATE, "YYYY-MM-DD">>>`;
 
     try {
       const data = await sendAIChatRequest({
@@ -271,8 +257,8 @@ RESPONSE FORMAT:
         if (rawReply.includes("<<<ACTION: CLEAR_BOARD>>>") || rawReply.includes("<<<ACTION:CLEAR_BOARD>>>") || rawReply.includes("<<<BLOCKS: []>>>")) {
           await clearAllBlocks();
           cleanContent = rawReply
-            .replace(/<<<ACTION:[\s\S]*?>>>/, "")
-            .replace(/<<<BLOCKS:[\s\S]*?>>>/, "")
+            .replace(/<<<ACTION:[\s\S]*?>>>/g, "")
+            .replace(/<<<BLOCKS:[\s\S]*?>>>/g, "")
             .trim() || "✨ Your execution board has been completely cleared.";
         }
 
@@ -283,7 +269,7 @@ RESPONSE FORMAT:
           const found = blocks.find((b) => b.id.toLowerCase() === target || b.title.toLowerCase().includes(target) || b.type.toLowerCase().includes(target));
           if (found) {
             await removeBlock(found.id);
-            cleanContent = rawReply.replace(/<<<ACTION:[\s\S]*?>>>/, "").trim() || `🗑️ Removed "${found.title}" from your board.`;
+            cleanContent = rawReply.replace(/<<<ACTION:[\s\S]*?>>>/g, "").trim() || `🗑️ Removed "${found.title}" from your board.`;
           }
         }
 
@@ -295,7 +281,7 @@ RESPONSE FORMAT:
           for (const b of matching) {
             await removeBlock(b.id);
           }
-          cleanContent = rawReply.replace(/<<<ACTION:[\s\S]*?>>>/, "").trim() || `🗑️ Removed ${matching.length} widgets scheduled for ${targetDate}.`;
+          cleanContent = rawReply.replace(/<<<ACTION:[\s\S]*?>>>/g, "").trim() || `🗑️ Removed ${matching.length} widgets scheduled for ${targetDate}.`;
         }
 
         // 1. Primary parser: <<<BLOCKS: [...]>>>
@@ -304,7 +290,6 @@ RESPONSE FORMAT:
           try {
             const parsed = JSON.parse(blocksMatch[1]);
             suggestedBlocks = Array.isArray(parsed) ? parsed : [parsed];
-            cleanContent = rawReply.replace(/<<<BLOCKS:[\s\S]*?>>>/, "").trim();
           } catch (jsonErr) {
             console.log("Could not parse AI block JSON", jsonErr);
           }
@@ -328,6 +313,12 @@ RESPONSE FORMAT:
             } catch (e) {}
           }
         }
+
+        // Always sanitize cleanContent so internal tags never display in the user bubble
+        cleanContent = cleanContent
+          .replace(/<<<BLOCKS:[\s\S]*?>>>/g, "")
+          .replace(/<<<ACTION:[\s\S]*?>>>/g, "")
+          .trim();
 
         // Strict Task List Fallback: ONLY extract if lines are explicitly bulleted items and not conversational sentences
         const rawLines = cleanContent.split("\n").map((l: string) => l.trim());
