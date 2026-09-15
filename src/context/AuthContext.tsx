@@ -19,7 +19,7 @@ import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from "firebase/firest
 export type UserRole = "admin" | "manager" | "member" | "guest";
 
 export interface AIConfig {
-  provider: "ollama" | "openai" | "groq" | "openrouter" | "gemini" | "nvidia" | "custom";
+  provider: "ollama" | "cloud" | "openai" | "groq" | "openrouter" | "gemini" | "nvidia" | "custom";
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -81,10 +81,10 @@ const defaultUser: UserProfile = {
 };
 
 const defaultAIConfig: AIConfig = {
-  provider: "nvidia",
+  provider: "cloud",
   apiKey: "",
-  baseUrl: "https://integrate.api.nvidia.com/v1",
-  model: "meta/llama-3.3-70b-instruct",
+  baseUrl: "",
+  model: "gpt-4o-mini",
   isEnabled: true
 };
 

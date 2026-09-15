@@ -30,7 +30,9 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 
 const AVATAR_PRESETS = [
@@ -40,6 +42,9 @@ const AVATAR_PRESETS = [
   "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80",
   "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80"
 ];
+
+const OLLAMA_PRESETS = ["llama3.2", "deepseek-r1", "qwen2.5", "mistral", "phi3", "gemma2"];
+const CLOUD_PRESETS = ["gpt-4o-mini", "llama-3.3-70b-versatile", "gemini-2.0-flash", "deepseek-chat", "gpt-4o"];
 
 export default function EmployeeSettingsPage() {
   const { user, updateProfile, aiConfig, updateAIConfig } = useAuth();
@@ -55,13 +60,15 @@ export default function EmployeeSettingsPage() {
   const [soundEnabled, setSoundEnabled] = useState(user.soundEnabled ?? true);
   const [defaultSprintMins, setDefaultSprintMins] = useState(user.defaultSprintMins || 25);
 
-  // AI Config states
-  const [aiProvider, setAiProvider] = useState(aiConfig.provider || "ollama");
+  // AI Config states: provider is either "ollama" or "cloud" (or legacy names)
+  const isInitialOllama = aiConfig.provider === "ollama";
+  const [aiProvider, setAiProvider] = useState<"ollama" | "cloud">(isInitialOllama ? "ollama" : "cloud");
   const [aiApiKey, setAiApiKey] = useState(aiConfig.apiKey || "");
-  const [aiBaseUrl, setAiBaseUrl] = useState(aiConfig.baseUrl || "http://127.0.0.1:11434");
-  const [aiModel, setAiModel] = useState(aiConfig.model || "llama3.2");
+  const [aiBaseUrl, setAiBaseUrl] = useState(aiConfig.baseUrl || "");
+  const [aiModel, setAiModel] = useState(aiConfig.model || (isInitialOllama ? "llama3.2" : "gpt-4o-mini"));
+  const [showAdvancedUrl, setShowAdvancedUrl] = useState(Boolean(aiConfig.baseUrl && !aiConfig.baseUrl.includes("127.0.0.1")));
 
-  // Available models (Local Ollama, NVIDIA NIM, Groq, OpenRouter, OpenAI, Gemini)
+  // Available models from local Ollama
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
 
@@ -92,55 +99,64 @@ export default function EmployeeSettingsPage() {
     reader.readAsDataURL(file);
   };
 
-  // Auto-fetch available models from provider API
+  // Auto-fetch available models from local Ollama
   const fetchAvailableModels = async () => {
+    if (aiProvider !== "ollama") return;
     setIsLoadingModels(true);
     try {
-      const url = `/api/ai/models?provider=${encodeURIComponent(aiProvider)}&baseUrl=${encodeURIComponent(aiBaseUrl)}&apiKey=${encodeURIComponent(aiApiKey)}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.models && Array.isArray(data.models) && data.models.length > 0) {
-        setAvailableModels(data.models);
-        if (!aiModel || !data.models.includes(aiModel)) {
-          const first = data.models[0];
-          setAiModel(first);
-          updateAIConfig({ model: first });
+      const res = await fetch("http://127.0.0.1:11434/api/tags").catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data.models && Array.isArray(data.models)) {
+          const names = data.models.map((m: any) => m.name.split(":")[0]);
+          setAvailableModels(names);
+          if (names.length > 0 && !names.includes(aiModel)) {
+            setAiModel(names[0]);
+            updateAIConfig({ model: names[0] });
+          }
+          return;
         }
-      } else {
-        setAvailableModels([]);
       }
+      setAvailableModels([]);
     } catch (e) {
-      console.log("Could not auto-fetch models", e);
+      setAvailableModels([]);
     } finally {
       setIsLoadingModels(false);
     }
   };
 
   useEffect(() => {
-    if (aiProvider === "ollama" || (aiApiKey && aiApiKey.length > 5)) {
+    if (aiProvider === "ollama") {
       fetchAvailableModels();
-    } else {
-      setAvailableModels([]);
     }
-  }, [aiProvider, aiBaseUrl, aiApiKey]);
+  }, [aiProvider]);
 
   // Sync with store when aiConfig updates
   useEffect(() => {
     if (aiConfig.model) setAiModel(aiConfig.model);
-    if (aiConfig.provider) setAiProvider(aiConfig.provider);
-    if (aiConfig.baseUrl) {
-      if (aiConfig.provider === "nvidia" && (aiConfig.baseUrl.includes("127.0.0.1") || aiConfig.baseUrl.includes("localhost"))) {
-        setAiBaseUrl("https://integrate.api.nvidia.com/v1");
-      } else {
-        setAiBaseUrl(aiConfig.baseUrl);
-      }
+    if (aiConfig.provider) {
+      setAiProvider(aiConfig.provider === "ollama" ? "ollama" : "cloud");
     }
     if (aiConfig.apiKey !== undefined) setAiApiKey(aiConfig.apiKey);
+    if (aiConfig.baseUrl !== undefined) setAiBaseUrl(aiConfig.baseUrl);
   }, [aiConfig]);
 
   // Update AI setting instantly and notify store
   const handleAIFieldChange = (field: "provider" | "apiKey" | "baseUrl" | "model", value: any) => {
-    if (field === "provider") setAiProvider(value);
+    if (field === "provider") {
+      setAiProvider(value);
+      if (value === "ollama") {
+        setAiBaseUrl("http://127.0.0.1:11434");
+        if (!aiModel || aiModel.includes("gpt") || aiModel.includes("gemini")) {
+          setAiModel("llama3.2");
+        }
+      } else {
+        setAiBaseUrl("");
+        if (!aiModel || aiModel === "llama3.2") {
+          setAiModel("gpt-4o-mini");
+        }
+      }
+    }
     if (field === "apiKey") setAiApiKey(value);
     if (field === "baseUrl") setAiBaseUrl(value);
     if (field === "model") setAiModel(value);
@@ -163,7 +179,7 @@ export default function EmployeeSettingsPage() {
     updateAIConfig({
       provider: aiProvider,
       apiKey: aiApiKey,
-      baseUrl: aiBaseUrl,
+      baseUrl: aiProvider === "ollama" ? "http://127.0.0.1:11434" : aiBaseUrl,
       model: aiModel
     });
 
@@ -179,7 +195,7 @@ export default function EmployeeSettingsPage() {
     updateAIConfig({
       provider: aiProvider,
       apiKey: aiApiKey,
-      baseUrl: aiBaseUrl,
+      baseUrl: aiProvider === "ollama" ? "http://127.0.0.1:11434" : aiBaseUrl,
       model: aiModel
     });
 
@@ -190,7 +206,7 @@ export default function EmployeeSettingsPage() {
         body: JSON.stringify({
           provider: aiProvider,
           apiKey: aiApiKey,
-          baseUrl: aiBaseUrl,
+          baseUrl: aiProvider === "ollama" ? "http://127.0.0.1:11434" : aiBaseUrl,
           model: aiModel,
           messages: [{ role: "user", content: "Say 'AI Copilot Connected!' in 3 words." }]
         })
@@ -213,7 +229,7 @@ export default function EmployeeSettingsPage() {
   const exportWorkspaceBackup = () => {
     const sanitizedAIConfig = {
       ...aiConfig,
-      apiKey: "" // Redacted for security to prevent credential leakage
+      apiKey: "" // Redacted for security
     };
 
     const backupData = {
@@ -280,18 +296,18 @@ export default function EmployeeSettingsPage() {
             </h1>
           </div>
           <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Customize your worker identity, AI copilot keys/Ollama models, and local data backups.
+            Customize your worker identity, AI copilot models, and local data backups.
           </p>
         </div>
       </div>
 
       <form onSubmit={handleSaveAll} className="space-y-6">
-        {/* Section 1: AI Copilot (Bring Your Own Key or Local Ollama) */}
+        {/* Section 1: Streamlined AI Copilot Configuration */}
         <div className="p-5 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-2xs space-y-5">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
               <Bot size={18} className="text-blue-600 dark:text-blue-400" />
-              <span>AI Copilot Provider (BYO-Key / Local Ollama)</span>
+              <span>AI Copilot Engine</span>
             </h3>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-semibold">
               Instant Sync
@@ -299,168 +315,230 @@ export default function EmployeeSettingsPage() {
           </div>
 
           <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Power your floating AI Copilot using 100% free Local Ollama (completely private & offline) or your own API key (OpenAI, Groq, OpenRouter, Gemini).
+            Choose between 100% free Local Ollama (private & offline) or connect any Cloud AI model with your API key.
           </p>
 
-          {/* Provider Selection */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            {[
-              { id: "ollama", label: "Local Ollama", desc: "100% Free & Private", icon: Cpu },
-              { id: "nvidia", label: "NVIDIA NIM", desc: "Free Cloud Llama/DeepSeek", icon: Sparkles },
-              { id: "groq", label: "Groq (Fast)", desc: "Llama-3.3-70b", icon: Globe },
-              { id: "openai", label: "OpenAI / Custom", desc: "GPT-4o / Compatible", icon: Key },
-              { id: "gemini", label: "Google Gemini", desc: "Gemini 1.5/2.0 Flash", icon: Sparkles },
-            ].map((p) => {
-              const Icon = p.icon;
-              const isSelected = aiProvider === p.id;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => {
-                    let newBaseUrl = aiBaseUrl;
-                    let newModel = aiModel;
+          {/* 2 Simple Mode Selector Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Card 1: Local Ollama */}
+            <button
+              type="button"
+              onClick={() => handleAIFieldChange("provider", "ollama")}
+              className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                aiProvider === "ollama"
+                  ? "border-blue-600 bg-blue-50/70 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/20 shadow-xs"
+                  : "border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-slate-50/50 dark:bg-zinc-950 text-slate-600 dark:text-zinc-400"
+              }`}
+            >
+              <div className="flex items-center justify-between w-full mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-bold">
+                    <Cpu size={16} />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-zinc-100">Local Ollama</div>
+                    <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">100% Free & Private</div>
+                  </div>
+                </div>
+                {aiProvider === "ollama" && <CheckCircle2 size={16} className="text-blue-600 dark:text-blue-400" />}
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                Runs on your machine via Ollama. No API keys needed, zero data leaves your computer.
+              </p>
+            </button>
 
-                    if (p.id === "ollama") {
-                      newBaseUrl = "http://127.0.0.1:11434";
-                      newModel = "llama3.2";
-                    } else if (p.id === "nvidia") {
-                      newBaseUrl = "https://integrate.api.nvidia.com/v1";
-                      newModel = "nvidia/llama-3.1-nemotron-70b-instruct";
-                    } else if (p.id === "groq") {
-                      newBaseUrl = "https://api.groq.com/openai/v1";
-                      newModel = "llama-3.3-70b-versatile";
-                    } else if (p.id === "openai") {
-                      newBaseUrl = "https://api.openai.com/v1";
-                      newModel = "gpt-4o-mini";
-                    } else if (p.id === "gemini") {
-                      newBaseUrl = "";
-                      newModel = "gemini-1.5-flash";
-                    }
-
-                    setAiProvider(p.id as any);
-                    setAiBaseUrl(newBaseUrl);
-                    setAiModel(newModel);
-                    setAiTestResult(null);
-
-                    updateAIConfig({
-                      provider: p.id as any,
-                      baseUrl: newBaseUrl,
-                      model: newModel
-                    });
-                  }}
-                  className={`p-3 rounded-xl border text-left flex flex-col justify-between transition-all ${
-                    isSelected
-                      ? "border-blue-600 bg-blue-50/70 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 ring-1 ring-blue-500/20 font-semibold"
-                      : "border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-slate-50/50 dark:bg-zinc-950 text-slate-600 dark:text-zinc-400"
-                  }`}
-                >
-                  <Icon size={16} className="mb-1 text-blue-500" />
-                  <div className="text-xs font-bold">{p.label}</div>
-                  <div className="text-[10px] text-slate-400 dark:text-zinc-500">{p.desc}</div>
-                </button>
-              );
-            })}
+            {/* Card 2: Cloud AI (Any Model) */}
+            <button
+              type="button"
+              onClick={() => handleAIFieldChange("provider", "cloud")}
+              className={`p-4 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
+                aiProvider === "cloud"
+                  ? "border-blue-600 bg-blue-50/70 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/20 shadow-xs"
+                  : "border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 bg-slate-50/50 dark:bg-zinc-950 text-slate-600 dark:text-zinc-400"
+              }`}
+            >
+              <div className="flex items-center justify-between w-full mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-purple-600 text-white flex items-center justify-center font-bold">
+                    <Sparkles size={16} />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-zinc-100">Cloud AI Model</div>
+                    <div className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold">Any API Key & Model</div>
+                  </div>
+                </div>
+                {aiProvider === "cloud" && <CheckCircle2 size={16} className="text-blue-600 dark:text-blue-400" />}
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                Works with OpenAI, Groq, NVIDIA, Google Gemini, DeepSeek, OpenRouter, or custom APIs.
+              </p>
+            </button>
           </div>
 
-          {/* Provider Specific Inputs */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-            {aiProvider !== "ollama" && (
-              <div className="space-y-1 sm:col-span-2">
-                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                  {aiProvider === "gemini" ? "Google Gemini API Key" : "API Key"}
+          {/* Configuration Inputs based on mode */}
+          {aiProvider === "ollama" ? (
+            /* Mode 1: Local Ollama Settings (Only 1 input: Model Name) */
+            <div className="space-y-3 pt-2">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                    <Bot size={13} className="text-blue-500" />
+                    <span>Ollama Model Name</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={fetchAvailableModels}
+                    className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:underline"
+                  >
+                    <RefreshCw size={11} className={isLoadingModels ? "animate-spin" : ""} />
+                    <span>Scan Installed Models</span>
+                  </button>
+                </div>
+
+                <div className="flex gap-2">
+                  {availableModels.length > 0 ? (
+                    <select
+                      value={aiModel}
+                      onChange={(e) => handleAIFieldChange("model", e.target.value)}
+                      className="flex-1 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 cursor-pointer shadow-2xs"
+                    >
+                      {availableModels.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                  <input
+                    type="text"
+                    value={aiModel}
+                    onChange={(e) => handleAIFieldChange("model", e.target.value)}
+                    placeholder="e.g. llama3.2, deepseek-r1, qwen2.5, mistral"
+                    className="flex-1 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 shadow-2xs"
+                  />
+                </div>
+
+                {/* Quick Model Chips */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-slate-400 dark:text-zinc-500">Popular:</span>
+                  {OLLAMA_PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => handleAIFieldChange("model", preset)}
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded-md border transition-all ${
+                        aiModel === preset
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-600"
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Mode 2: Cloud AI (Exactly 2 Fields: API Key & Model Name) */
+            <div className="space-y-4 pt-2">
+              {/* Field 1: API Key */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                  <Key size={13} className="text-purple-500" />
+                  <span>AI Provider API Key</span>
                 </label>
                 <input
                   type="password"
                   value={aiApiKey}
                   onChange={(e) => handleAIFieldChange("apiKey", e.target.value)}
-                  placeholder="sk-... or AIza..."
-                  className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"
+                  placeholder="Paste your API key (sk-..., gsk_..., nvapi-..., AIzaSy..., etc.)"
+                  className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 shadow-2xs"
                 />
+                <p className="text-[10px] text-slate-400 dark:text-zinc-500">
+                  Keys are stored encrypted locally on your browser and never logged.
+                </p>
               </div>
-            )}
 
-            {aiProvider !== "gemini" && (
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                  Base URL Endpoint
+              {/* Field 2: Model Name */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                  <Bot size={13} className="text-blue-500" />
+                  <span>Model Name</span>
                 </label>
-                <input
-                  type="text"
-                  value={aiBaseUrl}
-                  onChange={(e) => handleAIFieldChange("baseUrl", e.target.value)}
-                  placeholder={aiProvider === "ollama" ? "http://127.0.0.1:11434" : "https://api.openai.com/v1"}
-                  className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"
-                />
-              </div>
-            )}
-
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                  Model Name
-                </label>
-                <button
-                  type="button"
-                  onClick={fetchAvailableModels}
-                  className="text-[10px] text-blue-600 dark:text-blue-400 flex items-center gap-1 hover:underline"
-                >
-                  <RefreshCw size={10} className={isLoadingModels ? "animate-spin" : ""} />
-                  <span>Auto-Detect Models</span>
-                </button>
-              </div>
-
-              {/* If models detected, show dropdown with custom override option */}
-              {availableModels.length > 0 ? (
-                <div className="flex gap-2">
-                  <select
-                    value={aiModel}
-                    onChange={(e) => handleAIFieldChange("model", e.target.value)}
-                    className="flex-1 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 cursor-pointer"
-                  >
-                    {availableModels.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    value={aiModel}
-                    onChange={(e) => handleAIFieldChange("model", e.target.value)}
-                    placeholder="Or custom..."
-                    className="w-36 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-2.5 py-2 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"
-                  />
-                </div>
-              ) : (
                 <input
                   type="text"
                   value={aiModel}
                   onChange={(e) => handleAIFieldChange("model", e.target.value)}
-                  placeholder="e.g. nvidia/llama-3.1-nemotron-70b-instruct, gpt-4o-mini, gemini-1.5-flash"
-                  className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"
+                  placeholder="e.g. gpt-4o-mini, llama-3.3-70b-versatile, gemini-2.0-flash, deepseek-chat"
+                  className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 shadow-2xs"
                 />
-              )}
+
+                {/* Quick Model Chips */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-slate-400 dark:text-zinc-500">Suggestions:</span>
+                  {CLOUD_PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => handleAIFieldChange("model", preset)}
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded-md border transition-all ${
+                        aiModel === preset
+                          ? "bg-purple-600 text-white border-purple-600"
+                          : "bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300 dark:hover:border-zinc-600"
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Expandable Optional Custom Base URL */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedUrl(!showAdvancedUrl)}
+                  className="text-[11px] text-slate-500 dark:text-zinc-400 hover:text-slate-700 dark:hover:text-zinc-300 flex items-center gap-1 font-semibold"
+                >
+                  {showAdvancedUrl ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  <span>Advanced: Custom API Endpoint / Proxy (Optional)</span>
+                </button>
+
+                {showAdvancedUrl && (
+                  <div className="mt-2 space-y-1 animate-in fade-in">
+                    <input
+                      type="text"
+                      value={aiBaseUrl}
+                      onChange={(e) => handleAIFieldChange("baseUrl", e.target.value)}
+                      placeholder="e.g. https://openrouter.ai/api/v1 or https://api.groq.com/openai/v1"
+                      className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"
+                    />
+                    <p className="text-[10px] text-slate-400 dark:text-zinc-500">
+                      Leave blank to auto-detect endpoint from your key format.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Test Connection Button & Result */}
-          <div className="flex flex-wrap items-center gap-3 pt-2">
+          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-100 dark:border-zinc-800">
             <button
               type="button"
               onClick={testAIConnection}
               disabled={isTestingAI}
-              className="px-3.5 py-1.5 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors disabled:opacity-50"
+              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors disabled:opacity-50 shadow-2xs"
             >
               {isTestingAI ? (
                 <>
                   <Loader2 size={13} className="animate-spin text-blue-500" />
-                  <span>Testing Connection...</span>
+                  <span>Pinging Model...</span>
                 </>
               ) : (
                 <>
                   <Sparkles size={13} className="text-amber-500" />
-                  <span>Test AI Connection</span>
+                  <span>Test Connection</span>
                 </>
               )}
             </button>
@@ -520,14 +598,22 @@ export default function EmployeeSettingsPage() {
                 ))}
               </div>
 
-              <div className="flex items-center gap-2 flex-wrap pt-1">
+              {/* Upload or Custom URL */}
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="text"
+                  value={avatarUrl}
+                  onChange={(e) => setAvatarUrl(e.target.value)}
+                  placeholder="https://... custom avatar URL"
+                  className="flex-1 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-zinc-100 outline-none focus:border-blue-500 font-mono"
+                />
                 <button
                   type="button"
                   onClick={() => avatarFileInputRef.current?.click()}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 hover:border-blue-500 flex items-center gap-1.5 text-xs font-semibold shadow-2xs transition-all"
+                  className="px-3 py-1.5 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors"
                 >
-                  <Upload size={13} className="text-blue-500" />
-                  <span>Upload Local Photo</span>
+                  <Upload size={13} />
+                  <span>Upload</span>
                 </button>
                 <input
                   type="file"
@@ -537,18 +623,10 @@ export default function EmployeeSettingsPage() {
                   className="hidden"
                 />
               </div>
-
-              <input
-                type="url"
-                value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
-                placeholder="https://example.com/your-avatar.jpg"
-                className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500 font-mono"
-              />
             </div>
           </div>
 
-          {/* Name & Job Title */}
+          {/* Form Fields */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
             <div className="space-y-1">
               <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
@@ -558,20 +636,8 @@ export default function EmployeeSettingsPage() {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                Job Title / Specialization
-              </label>
-              <input
-                type="text"
-                value={jobTitle}
-                onChange={(e) => setJobTitle(e.target.value)}
-                placeholder="e.g. Senior Frontend Engineer, Sales SDR"
-                className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500"
+                placeholder="e.g. Abhiram Kodicherla"
+                className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 outline-none focus:border-blue-500 font-medium"
               />
             </div>
 
@@ -583,47 +649,94 @@ export default function EmployeeSettingsPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500"
+                placeholder="name@company.com"
+                className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 outline-none focus:border-blue-500 font-medium"
               />
             </div>
 
             <div className="space-y-1">
               <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                Daily Work Hours
+                Job Title / Discipline
+              </label>
+              <input
+                type="text"
+                value={jobTitle}
+                onChange={(e) => setJobTitle(e.target.value)}
+                placeholder="e.g. Founder & Full-Stack Engineer"
+                className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 outline-none focus:border-blue-500 font-medium"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
+                Active Work Hours
               </label>
               <input
                 type="text"
                 value={workHours}
                 onChange={(e) => setWorkHours(e.target.value)}
-                placeholder="9:00 AM – 6:00 PM"
-                className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-blue-500"
+                placeholder="e.g. 9:00 AM – 6:00 PM"
+                className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 outline-none focus:border-blue-500 font-medium"
               />
             </div>
           </div>
         </div>
 
-        {/* Section 3: Focus & Sound Preferences */}
+        {/* Section 3: Preferences & Audio */}
         <div className="p-5 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-2xs space-y-4">
           <h3 className="text-sm font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
-            <Clock size={16} className="text-blue-500" />
-            <span>Workflow & Focus Settings</span>
+            <Volume2 size={16} className="text-emerald-500" />
+            <span>Workspace Audio & Sprint Defaults</span>
           </h3>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
-                Default Focus Sprint Duration
-              </label>
-              <div className="flex gap-2">
-                {[15, 25, 45, 50, 60].map((mins) => (
+            {/* Audio Toggle */}
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-slate-900 dark:text-zinc-100">
+                  Acoustic Feedback
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  Subtle synthetic mechanical clicks on task completion
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !soundEnabled;
+                  setSoundEnabled(next);
+                  setGlobalSoundEnabled(next);
+                }}
+                className={`p-2 rounded-xl transition-colors ${
+                  soundEnabled
+                    ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400"
+                    : "bg-slate-200 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400"
+                }`}
+              >
+                {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+              </button>
+            </div>
+
+            {/* Default Sprint Duration */}
+            <div className="p-3.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-950 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-slate-900 dark:text-zinc-100">
+                  Default Sprint Timer
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  Standard duration for new Focus Sprints
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {[15, 25, 45].map((mins) => (
                   <button
                     key={mins}
                     type="button"
                     onClick={() => setDefaultSprintMins(mins)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                    className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
                       defaultSprintMins === mins
-                        ? "bg-blue-600 text-white border-blue-600 shadow-xs"
-                        : "bg-slate-50 dark:bg-zinc-950 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400"
+                        ? "bg-blue-600 text-white"
+                        : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:bg-slate-300 dark:hover:bg-zinc-700"
                     }`}
                   >
                     {mins}m
@@ -631,95 +744,74 @@ export default function EmployeeSettingsPage() {
                 ))}
               </div>
             </div>
-
-            <div className="flex items-center justify-between p-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950">
-              <div>
-                <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100">
-                  Sound Feedback & Chimes
-                </div>
-                <div className="text-[11px] text-slate-400 dark:text-zinc-500">
-                  Play subtle chimes when timers & batch goals finish.
-                </div>
-              </div>
-              <input
-                type="checkbox"
-                checked={soundEnabled}
-                onChange={(e) => {
-                  setSoundEnabled(e.target.checked);
-                  setGlobalSoundEnabled(e.target.checked);
-                }}
-                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300 dark:border-zinc-700 cursor-pointer"
-              />
-            </div>
           </div>
         </div>
 
-        {/* Section 4: Data Ownership & Backup Hub */}
+        {/* Section 4: Data Portability & Backups */}
         <div className="p-5 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-2xs space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
-              <ShieldCheck size={16} className="text-emerald-500" />
-              <span>Data Ownership & Local Backup Hub</span>
-            </h3>
-            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400">
-              100% Private
-            </span>
-          </div>
-
+          <h3 className="text-sm font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-2">
+            <Download size={16} className="text-amber-500" />
+            <span>Workspace Data Portability</span>
+          </h3>
           <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Export your entire workspace configuration, tables, AI keys, and routine templates into a portable JSON backup file.
+            Export a full JSON backup of your blocks and routines, or restore your configuration onto any device.
           </p>
 
           <div className="flex flex-wrap items-center gap-3 pt-1">
             <button
               type="button"
               onClick={exportWorkspaceBackup}
-              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors shadow-2xs"
+              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-2xs"
             >
-              <Download size={14} className="text-blue-500" />
-              <span>Export Full Workspace Backup (JSON)</span>
+              <Download size={14} className="text-amber-500" />
+              <span>Export JSON Backup</span>
             </button>
 
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 rounded-lg text-xs font-semibold flex items-center gap-2 transition-colors shadow-2xs"
+              className="px-4 py-2 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-800 dark:text-zinc-200 rounded-xl text-xs font-bold flex items-center gap-2 transition-colors shadow-2xs"
             >
-              <FileUp size={14} className="text-emerald-500" />
-              <span>Restore Workspace from File</span>
+              <FileUp size={14} className="text-blue-500" />
+              <span>Import & Restore</span>
             </button>
-
             <input
-              ref={fileInputRef}
               type="file"
-              accept=".json"
+              ref={fileInputRef}
               onChange={handleImportFile}
+              accept=".json"
               className="hidden"
             />
-          </div>
 
-          {importStatus && (
-            <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300 font-medium">
-              {importStatus}
-            </div>
-          )}
+            {importStatus && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold animate-in fade-in">
+                {importStatus}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Save Button */}
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            type="submit"
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-colors"
-          >
-            {savedSuccess ? (
-              <>
-                <Check size={15} />
-                <span>Saved All Settings & AI Keys!</span>
-              </>
-            ) : (
-              <span>Save Profile & AI Settings</span>
+        {/* Save Footer Bar */}
+        <div className="pt-2 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-zinc-500">
+            <ShieldCheck size={14} className="text-emerald-500" />
+            <span>Encrypted local session active</span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            {savedSuccess && (
+              <span className="text-xs text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1 animate-in fade-in">
+                <Check size={14} />
+                <span>Preferences Saved!</span>
+              </span>
             )}
-          </button>
+            <button
+              type="submit"
+              className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all"
+            >
+              <span>Save Changes</span>
+            </button>
+          </div>
         </div>
       </form>
     </div>
