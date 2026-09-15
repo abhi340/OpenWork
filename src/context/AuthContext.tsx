@@ -124,6 +124,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
         setUser(profile);
         localStorage.setItem("openwork_user_profile", JSON.stringify(profile));
+
+        // Restore saved AI configuration permanently across devices & daily logins
+        if (data.aiConfig && typeof data.aiConfig === "object") {
+          setAIConfig((prev) => {
+            const merged = { ...prev, ...data.aiConfig };
+            try {
+              localStorage.setItem("openwork_ai_config", JSON.stringify(merged));
+            } catch (e) {}
+            return merged;
+          });
+        }
       } else {
         // Create initial Firestore Profile Document
         const newProfile: UserProfile = {
@@ -416,12 +427,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const updateAIConfig = (updates: Partial<AIConfig>) => {
+  const updateAIConfig = async (updates: Partial<AIConfig>) => {
+    let nextConfig: AIConfig = { ...aiConfig, ...updates };
     setAIConfig((prev) => {
-      const updated = { ...prev, ...updates };
-      localStorage.setItem("openwork_ai_config", JSON.stringify(updated));
-      return updated;
+      nextConfig = { ...prev, ...updates };
+      try {
+        localStorage.setItem("openwork_ai_config", JSON.stringify(nextConfig));
+      } catch (e) {}
+      return nextConfig;
     });
+
+    if (auth.currentUser?.uid) {
+      try {
+        const userRef = doc(db, "users", auth.currentUser.uid);
+        await setDoc(userRef, {
+          aiConfig: nextConfig,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Could not save aiConfig to Firestore:", err);
+      }
+    }
   };
 
   return (

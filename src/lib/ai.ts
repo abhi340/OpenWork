@@ -162,7 +162,7 @@ export async function detectModelsFromApiKey(apiKey: string, customBaseUrl = "")
   };
 }
 
-// Universal Chat Execution (Direct Client API with graceful fallback)
+// Universal Chat Execution (Direct Client API with resilient Edge Gateway fallback)
 export async function sendAIChatRequest(params: {
   provider?: string;
   apiKey?: string;
@@ -172,7 +172,7 @@ export async function sendAIChatRequest(params: {
 }): Promise<{ reply: string; error?: string }> {
   const { provider = "cloud", apiKey = "", baseUrl = "", model = "", messages } = params;
 
-  // A. Local Ollama Execution
+  // A. Local Ollama Execution (Runs directly on local machine)
   if (provider === "ollama") {
     const targetBase = (baseUrl || "http://127.0.0.1:11434").replace(/\/+$/, "");
     const targetModel = model || "llama3.2";
@@ -198,7 +198,7 @@ export async function sendAIChatRequest(params: {
     }
   }
 
-  // B. Cloud AI Direct Execution
+  // B. Cloud AI Execution
   const cleanKey = (apiKey || "").trim();
   const cleanModel = (model || "").trim();
 
@@ -206,9 +206,9 @@ export async function sendAIChatRequest(params: {
     return { reply: "", error: "Please enter your AI API key in Settings." };
   }
 
-  // 1. Google Gemini
+  // 1. Google Gemini (Google natively supports browser CORS)
   if (cleanKey.startsWith("AIzaSy") || cleanModel.startsWith("gemini")) {
-    const geminiModel = cleanModel || "gemini-2.0-flash";
+    const geminiModel = cleanModel || "gemini-1.5-flash";
     try {
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${encodeURIComponent(cleanKey)}`,
@@ -230,16 +230,51 @@ export async function sendAIChatRequest(params: {
       }
       return { reply: data.candidates?.[0]?.content?.parts?.[0]?.text || "No reply generated." };
     } catch (err: any) {
-      return { reply: "", error: `Gemini API Error: ${err.message}` };
+      // Proceed to server proxy below if direct browser fails
     }
   }
 
-  // 2. OpenAI / Groq / NVIDIA / OpenRouter / Custom Endpoint
+  // 2. Resilient Edge Proxy Execution (Groq, NVIDIA NIM, OpenAI, OpenRouter, Custom)
+  const proxyEndpoints = [
+    "/api/ai/chat",
+    "https://openwork.abhicm019.workers.dev/api/ai/chat"
+  ];
+
+  for (const endpoint of proxyEndpoints) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: "cloud",
+          apiKey: cleanKey,
+          baseUrl: baseUrl || "",
+          model: cleanModel,
+          messages
+        })
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const data = await res.json();
+        if (!res.ok) {
+          return { reply: "", error: data.error || `AI Error (${res.status})` };
+        }
+        if (data.reply) {
+          return { reply: data.reply };
+        }
+      }
+    } catch (proxyErr) {
+      // Continue to next proxy endpoint
+    }
+  }
+
+  // 3. Direct Browser fallback if proxies were unreachable
   let targetEndpoint = baseUrl;
   if (!targetEndpoint) {
     if (cleanKey.startsWith("gsk_") || cleanModel.includes("llama-3.3") || cleanModel.includes("mixtral")) {
       targetEndpoint = "https://api.groq.com/openai/v1";
-    } else if (cleanKey.startsWith("nvapi-") || cleanModel.startsWith("nvidia/") || cleanModel.startsWith("meta/")) {
+    } else if (cleanKey.startsWith("nvapi-") || cleanModel.startsWith("nvidia/") || cleanModel.startsWith("meta/") || cleanModel.startsWith("deepseek-ai/")) {
       targetEndpoint = "https://integrate.api.nvidia.com/v1";
     } else if (cleanKey.startsWith("sk-or-")) {
       targetEndpoint = "https://openrouter.ai/api/v1";
@@ -266,31 +301,10 @@ export async function sendAIChatRequest(params: {
 
     const data = await res.json();
     if (!res.ok) {
-      return { reply: "", error: data.error?.message || data.detail || `AI Error (${res.status})` };
+      return { reply: "", error: data.error?.message || data.detail || `AI Provider Error (${res.status})` };
     }
-
     return { reply: data.choices?.[0]?.message?.content || "No reply generated." };
   } catch (err: any) {
-    // If browser CORS fails, fallback to server endpoint
-    try {
-      const serverRes = await fetch("/api/ai/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: "cloud",
-          apiKey: cleanKey,
-          baseUrl: endpoint,
-          model: targetModel,
-          messages
-        })
-      });
-      const serverData = await serverRes.json();
-      if (!serverRes.ok) {
-        return { reply: "", error: serverData.error || `AI Error (${serverRes.status})` };
-      }
-      return { reply: serverData.reply || "" };
-    } catch (e: any) {
-      return { reply: "", error: `Connection failed: ${err.message}` };
-    }
+    return { reply: "", error: `Connection failed: ${err.message}. Please verify your API key and model.` };
   }
 }

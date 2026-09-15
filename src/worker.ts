@@ -36,6 +36,7 @@ export default {
     // 5. API: /api/ai/chat
     if (url.pathname === "/api/ai/chat") {
       const chatModule = await import("../functions/api/ai/chat");
+      if (request.method === "OPTIONS") return chatModule.onRequestOptions();
       return chatModule.onRequestPost({ env, request });
     }
 
