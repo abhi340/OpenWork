@@ -187,14 +187,31 @@ export async function detectModelsFromApiKey(apiKey: string, customBaseUrl = "")
 }
 
 // Auto-detect installed local Ollama models across 127.0.0.1 and localhost
+// Auto-detect installed local Ollama models across tunnel, 127.0.0.1 and localhost
 export async function detectOllamaModels(customBaseUrl = ""): Promise<{
   isConnected: boolean;
   models: string[];
   activeUrl: string;
 }> {
-  const sanitized = extractValidHttpUrl(customBaseUrl);
+  let sanitized = extractValidHttpUrl(customBaseUrl);
+
+  // If no explicit HTTPS tunnel URL is provided, probe D1 for active tunnel
+  if (!sanitized || sanitized.includes("127.0.0.1") || sanitized.includes("localhost")) {
+    try {
+      const tunnelRes = await fetch("/api/ai/tunnel").catch(() =>
+        fetch("https://openwork.abhicm019.workers.dev/api/ai/tunnel").catch(() => null)
+      );
+      if (tunnelRes && tunnelRes.ok) {
+        const tunnelData = await tunnelRes.json();
+        if (tunnelData.tunnelUrl && tunnelData.isOnline !== false) {
+          sanitized = tunnelData.tunnelUrl;
+        }
+      }
+    } catch (e) {}
+  }
+
   const candidateHosts = sanitized
-    ? [sanitized]
+    ? [sanitized, "http://127.0.0.1:11434", "http://localhost:11434"]
     : ["http://127.0.0.1:11434", "http://localhost:11434"];
 
   for (const host of candidateHosts) {
@@ -248,22 +265,38 @@ export async function sendAIChatRequest(params: {
     cleanKey.startsWith("sk-")
   );
 
-  const rawUrl = extractValidHttpUrl(baseUrl);
+  let rawUrl = extractValidHttpUrl(baseUrl);
   const isLocalUrl = !rawUrl || rawUrl.includes("127.0.0.1") || rawUrl.includes("localhost");
-  const isTunnelUrl = rawUrl.startsWith("https://");
 
   // Only attempt local Ollama if explicit cloud model wasn't requested
   const shouldExecuteOllama = provider === "ollama" && !isExplicitCloudModel;
 
   // A. Local Ollama Execution
   if (shouldExecuteOllama) {
-    // If on an HTTPS domain (e.g. Cloudflare) and user provided an HTTPS tunnel or remote server, proxy through edge
-    if (isTunnelUrl) {
-      const proxyEndpoints = [
-        "/api/ai/chat",
-        "https://openwork.abhicm019.workers.dev/api/ai/chat"
-      ];
+    let effectiveOllamaUrl = rawUrl;
 
+    // If on HTTPS and no tunnel URL is specified, try discovering the active tunnel from D1
+    if (isHttpsPage && isLocalUrl) {
+      try {
+        const tunnelRes = await fetch("/api/ai/tunnel").catch(() =>
+          fetch("https://openwork.abhicm019.workers.dev/api/ai/tunnel").catch(() => null)
+        );
+        if (tunnelRes && tunnelRes.ok) {
+          const tunnelData = await tunnelRes.json();
+          if (tunnelData.tunnelUrl) {
+            effectiveOllamaUrl = tunnelData.tunnelUrl;
+          }
+        }
+      } catch (e) {}
+    }
+
+    const proxyEndpoints = [
+      "/api/ai/chat",
+      "https://openwork.abhicm019.workers.dev/api/ai/chat"
+    ];
+
+    // If on HTTPS or we have an active tunnel, proxy through edge router
+    if (isHttpsPage || (effectiveOllamaUrl && effectiveOllamaUrl.startsWith("https://"))) {
       for (const endpoint of proxyEndpoints) {
         try {
           const res = await fetch(endpoint, {
@@ -271,7 +304,8 @@ export async function sendAIChatRequest(params: {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               provider: "ollama",
-              baseUrl: rawUrl,
+              apiKey: cleanKey,
+              baseUrl: effectiveOllamaUrl,
               model: model || "llama3.2",
               messages
             })
@@ -281,16 +315,16 @@ export async function sendAIChatRequest(params: {
           if (res.ok && data.reply) {
             return { reply: data.reply };
           }
-          if (data.error) {
+          if (data.error && !hasCloudKey) {
             return { reply: "", error: data.error };
           }
         } catch (e) {}
       }
     }
 
-    // Direct Browser Execution for Ollama (Works on localhost or custom direct domains)
-    const candidateHosts = rawUrl
-      ? [rawUrl]
+    // Direct Browser Execution for Ollama (Works on localhost or direct custom domain)
+    const candidateHosts = effectiveOllamaUrl
+      ? [effectiveOllamaUrl, "http://127.0.0.1:11434", "http://localhost:11434"]
       : ["http://127.0.0.1:11434", "http://localhost:11434"];
     
     const rawModel = (model || "").trim();
@@ -348,26 +382,39 @@ export async function sendAIChatRequest(params: {
       }
     }
 
-    // If local Ollama is blocked by browser mixed-content or offline:
-    // If the user has a configured Cloud API key (e.g. NVIDIA NIM), seamlessly fall back to Cloud AI!
+    // If local Ollama is blocked or unreachable and user has NO cloud key:
     if (!hasCloudKey) {
       if (isHttpsPage && isLocalUrl) {
         return {
           reply: "",
-          error: "Browser Security Block: Your browser blocks HTTPS pages (Cloudflare) from connecting to insecure 'http://127.0.0.1:11434'. To use Local Ollama on Cloudflare: 1) Run 'cloudflared tunnel --url http://localhost:11434' (or 'ngrok http 11434'), 2) Paste the https:// tunnel URL into Settings -> Ollama Endpoint URL."
+          error: "Local Ollama is not bridged to Cloudflare. Run 'npm run tunnel' on your PC to auto-connect, or enter your NVIDIA NIM API key in Settings!"
         };
       }
 
       return {
         reply: "",
-        error: `Could not connect to Ollama (${candidateHosts[0]}). Make sure Ollama is running and OLLAMA_ORIGINS="*" is set.`
+        error: `Could not connect to Ollama (${candidateHosts[0]}). Make sure Ollama is running or run 'npm run tunnel'.`
       };
     }
   }
 
-  // B. Cloud AI Execution
+  // B. Cloud AI Execution (Direct or Fallback)
   if (!cleanKey) {
     return { reply: "", error: "Please enter your AI API key in Settings." };
+  }
+
+  // Map Ollama model name to appropriate Cloud AI model if falling back
+  let effectiveCloudModel = cleanModel;
+  if (!effectiveCloudModel || effectiveCloudModel.startsWith("llama3.2") || effectiveCloudModel.startsWith("llama-3.2") || !effectiveCloudModel.includes("/")) {
+    if (cleanKey.startsWith("nvapi-")) {
+      effectiveCloudModel = "meta/llama-3.2-11b-vision-instruct";
+    } else if (cleanKey.startsWith("gsk_")) {
+      effectiveCloudModel = "llama-3.3-70b-versatile";
+    } else if (cleanKey.startsWith("AIzaSy")) {
+      effectiveCloudModel = "gemini-1.5-flash";
+    } else {
+      effectiveCloudModel = "gpt-4o-mini";
+    }
   }
 
   const isNvidia = cleanKey.startsWith("nvapi-") || cleanModel.startsWith("nvidia/") || cleanModel.startsWith("meta/llama-3.2") || cleanModel.startsWith("mistralai/") || cleanModel.startsWith("deepseek-ai/");
@@ -416,7 +463,7 @@ export async function sendAIChatRequest(params: {
           provider: "cloud",
           apiKey: cleanKey,
           baseUrl: validCustomEndpoint,
-          model: cleanModel,
+          model: effectiveCloudModel,
           messages
         })
       });

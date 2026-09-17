@@ -46,6 +46,14 @@ export default {
       return modelsModule.onRequestGet({ env, request });
     }
 
+    // 7. API: /api/ai/tunnel
+    if (url.pathname === "/api/ai/tunnel") {
+      const tunnelModule = await import("../functions/api/ai/tunnel");
+      if (request.method === "OPTIONS") return tunnelModule.onRequestOptions();
+      if (request.method === "GET") return tunnelModule.onRequestGet({ env, request });
+      if (request.method === "POST") return tunnelModule.onRequestPost({ env, request });
+    }
+
     // 7. Static Assets Fallback (Serves Next.js exported files from /out)
     if (env.ASSETS) {
       const assetResponse = await env.ASSETS.fetch(request);

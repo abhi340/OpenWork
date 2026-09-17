@@ -138,12 +138,31 @@ export default function EmployeeSettingsPage() {
   }, [aiModel, updateAIConfig]);
 
   const [isOllamaRunning, setIsOllamaRunning] = useState<boolean | null>(null);
+  const [discoveredTunnelUrl, setDiscoveredTunnelUrl] = useState<string>("");
 
-  // Scan Local Ollama Models
+  // Scan Local Ollama Models & Discover Active Cloudflare Tunnels
   const fetchOllamaModels = async () => {
     setIsDetecting(true);
     try {
-      const sanitizedUrl = extractValidHttpUrl(ollamaEndpoint) || "http://127.0.0.1:11434";
+      let targetUrl = extractValidHttpUrl(ollamaEndpoint);
+
+      // Probe /api/ai/tunnel for auto-registered tunnels
+      try {
+        const tunnelRes = await fetch("/api/ai/tunnel").catch(() => null);
+        if (tunnelRes && tunnelRes.ok) {
+          const tunnelData = await tunnelRes.json();
+          if (tunnelData.tunnelUrl) {
+            setDiscoveredTunnelUrl(tunnelData.tunnelUrl);
+            if (!targetUrl || targetUrl.includes("127.0.0.1") || targetUrl.includes("localhost")) {
+              targetUrl = tunnelData.tunnelUrl;
+              setOllamaEndpoint(tunnelData.tunnelUrl);
+              updateAIConfig({ ollamaUrl: tunnelData.tunnelUrl, baseUrl: tunnelData.tunnelUrl });
+            }
+          }
+        }
+      } catch (e) {}
+
+      const sanitizedUrl = targetUrl || "http://127.0.0.1:11434";
       const result = await detectOllamaModels(sanitizedUrl);
       setIsOllamaRunning(result.isConnected);
       setDetectedProviderName("Local Ollama");
@@ -597,6 +616,41 @@ export default function EmployeeSettingsPage() {
                 </p>
 
                 <div className="space-y-2">
+                  {discoveredTunnelUrl && (
+                    <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 flex items-center justify-between text-xs font-mono shadow-2xs animate-in fade-in">
+                      <div className="truncate text-emerald-900 dark:text-emerald-200 text-[11px] flex items-center gap-1.5 mr-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
+                        <span className="font-bold font-sans">Active Tunnel Synced:</span>
+                        <span className="truncate">{discoveredTunnelUrl}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOllamaEndpoint(discoveredTunnelUrl);
+                          updateAIConfig({ ollamaUrl: discoveredTunnelUrl, baseUrl: discoveredTunnelUrl });
+                        }}
+                        className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold font-sans transition-colors cursor-pointer flex-shrink-0"
+                      >
+                        {ollamaEndpoint === discoveredTunnelUrl ? "Connected ✓" : "Use Tunnel"}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Option 1: 1-Click Auto Tunnel Script */}
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-emerald-200 dark:border-emerald-800/80 flex items-center justify-between text-xs font-mono shadow-2xs">
+                    <div className="truncate text-slate-800 dark:text-zinc-200 text-[11px]">
+                      <span className="text-emerald-600 dark:text-emerald-400 font-bold font-sans mr-1.5">[1-Click Auto Bridge]</span>
+                      <span>npm run tunnel</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard("npm run tunnel", "npm-tunnel")}
+                      className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold font-sans transition-colors cursor-pointer ml-2 flex-shrink-0 flex items-center gap-1"
+                    >
+                      {copiedTunnelCmd === "npm-tunnel" ? <Check size={12} /> : <Copy size={12} />}
+                      <span>{copiedTunnelCmd === "npm-tunnel" ? "Copied!" : "Copy"}</span>
+                    </button>
+                  </div>
                   {/* Option 1: Free Cloudflare Tunnel */}
                   <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800 flex items-center justify-between text-xs font-mono shadow-2xs">
                     <div className="truncate text-slate-800 dark:text-zinc-200 text-[11px]">

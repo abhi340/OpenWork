@@ -38,57 +38,66 @@ export const onRequestPost = async (context: { env: any; request: Request }) => 
     const body: any = await context.request.json();
     const { provider = "cloud", apiKey = "", baseUrl = "", model = "", messages = [] } = body;
 
-    // 1. Local Ollama Execution
+    // 1. Local Ollama Execution with Cloudflare Tunnel & D1 Auto-Resolution
     if (provider === "ollama") {
-      const sanitizedUrl = extractValidHttpUrl(baseUrl);
-      const targetBase = (sanitizedUrl || "http://127.0.0.1:11434").replace(/\/+$/, "");
+      let targetBase = extractValidHttpUrl(baseUrl);
       const targetModel = model || "llama3.2";
 
-      // If user supplied local loopback URL on the Cloudflare server, explain how to connect via tunnel
-      if (targetBase.includes("127.0.0.1") || targetBase.includes("localhost")) {
+      // If no valid external HTTPS URL was passed, try auto-resolving from D1 system_settings
+      if (!targetBase || targetBase.includes("127.0.0.1") || targetBase.includes("localhost")) {
+        const db = context.env?.DB;
+        if (db) {
+          try {
+            const row: any = await db
+              .prepare("SELECT value FROM system_settings WHERE key = 'ollama_tunnel_url'")
+              .first();
+            if (row && row.value) {
+              targetBase = row.value.replace(/\/+$/, "");
+            }
+          } catch (e) {}
+        }
+      }
+
+      // If we now have an active HTTPS tunnel, call Ollama through the tunnel
+      if (targetBase && !targetBase.includes("127.0.0.1") && !targetBase.includes("localhost")) {
+        try {
+          const res = await fetch(`${targetBase}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: targetModel,
+              messages: messages.map((m: any) => ({ role: m.role, content: m.content }))
+            })
+          });
+
+          if (res.ok) {
+            const data: any = await res.json();
+            const reply = data.choices?.[0]?.message?.content || data.message?.content;
+            if (reply) {
+              return new Response(JSON.stringify({ reply }), { headers: corsHeaders });
+            }
+          }
+        } catch (err: any) {
+          // If tunnel attempt failed and user has no cloud key, report error; otherwise fall through to Cloud AI
+          if (!apiKey) {
+            return new Response(JSON.stringify({
+              error: `Could not reach Ollama via tunnel (${targetBase}): ${err.message}. Ensure your tunnel script is running.`
+            }), { status: 502, headers: corsHeaders });
+          }
+        }
+      }
+
+      // If still on local loopback and user has NO Cloud API key, return instructional prompt
+      if (!apiKey && (!targetBase || targetBase.includes("127.0.0.1") || targetBase.includes("localhost"))) {
         return new Response(JSON.stringify({
-          error: "Cloudflare Server cannot reach local 127.0.0.1 on your PC. In a browser on HTTPS, browser security blocks direct insecure HTTP to localhost. To connect Ollama on Cloudflare: 1) Run 'cloudflared tunnel --url http://localhost:11434' (or 'ngrok http 11434'), 2) Paste the https:// URL into Settings -> Ollama Endpoint URL."
+          error: "Cloudflare Server cannot reach local 127.0.0.1 directly. Run 'npm run tunnel' on your PC to auto-connect your local Ollama to Cloudflare!"
         }), {
           status: 400,
           headers: corsHeaders
         });
       }
 
-      // User provided an HTTPS tunnel or remote Ollama URL
-      try {
-        const res = await fetch(`${targetBase}/v1/chat/completions`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: targetModel,
-            messages: messages.map((m: any) => ({ role: m.role, content: m.content }))
-          })
-        });
-
-        if (!res.ok) {
-          const err: any = await res.json().catch(() => ({ error: "Ollama Error" }));
-          return new Response(JSON.stringify({
-            error: err.error?.message || err.detail || `Ollama returned HTTP ${res.status} from ${targetBase}.`
-          }), {
-            status: res.status,
-            headers: corsHeaders
-          });
-        }
-
-        const data: any = await res.json();
-        return new Response(JSON.stringify({
-          reply: data.choices?.[0]?.message?.content || data.message?.content || "No reply generated."
-        }), {
-          headers: corsHeaders
-        });
-      } catch (err: any) {
-        return new Response(JSON.stringify({
-          error: `Could not connect to Ollama at ${targetBase} (${err.message}). Verify the tunnel URL is active.`
-        }), {
-          status: 502,
-          headers: corsHeaders
-        });
-      }
+      // If user has a cloud API key (e.g. NVIDIA NIM or OpenAI), seamlessly fall through to Cloud AI!
     }
 
     // 2. Cloud AI Provider Execution
@@ -156,6 +165,12 @@ export const onRequestPost = async (context: { env: any; request: Request }) => 
       // If user has an NVIDIA key but the model is empty, default gpt-4o, or the retired llama-3.3-70b, switch to active llama-3.2-11b
       if (!effectiveModel || effectiveModel === "gpt-4o-mini" || effectiveModel.includes("llama-3.3-70b") || !effectiveModel.includes("/")) {
         effectiveModel = "meta/llama-3.2-11b-vision-instruct";
+      }
+    } else if (effectiveModel.startsWith("llama3.2") || effectiveModel.startsWith("llama-3.2")) {
+      if (cleanKey.startsWith("gsk_")) {
+        effectiveModel = "llama-3.3-70b-versatile";
+      } else {
+        effectiveModel = "gpt-4o-mini";
       }
     } else if (!effectiveModel) {
       effectiveModel = "gpt-4o-mini";
