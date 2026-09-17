@@ -15,19 +15,32 @@ export const onRequestOptions = async () => {
   });
 };
 
+function isBlockedHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return (
+    h === "169.254.169.254" ||
+    h === "metadata.google.internal" ||
+    h === "0.0.0.0" ||
+    h === "::1" ||
+    h.startsWith("169.254.")
+  );
+}
+
 function extractValidHttpUrl(input?: string): string {
   if (!input || typeof input !== "string") return "";
   const trimmed = input.trim();
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
     try {
-      new URL(trimmed);
+      const parsed = new URL(trimmed);
+      if (isBlockedHost(parsed.hostname)) return "";
       return trimmed.replace(/\/+$/, "");
     } catch {}
   }
   const match = trimmed.match(/(https?:\/\/[^\s'"]+)/);
   if (match) {
     try {
-      new URL(match[1]);
+      const parsed = new URL(match[1]);
+      if (isBlockedHost(parsed.hostname)) return "";
       return match[1].replace(/\/+$/, "");
     } catch {}
   }

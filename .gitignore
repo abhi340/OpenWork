@@ -58,3 +58,7 @@ pb_public/
 *.tsbuildinfo
 next-env.d.ts
 
+# local tunnel state
+.tunnel_url
+
+
