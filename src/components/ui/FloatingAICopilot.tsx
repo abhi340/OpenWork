@@ -195,8 +195,8 @@ export function FloatingAICopilot() {
       }
     } catch (e) {}
 
-    // Auto-align provider if an explicit cloud model or cloud API key is configured
-    if (activeConfig.model && (activeConfig.model.includes("/") || activeConfig.apiKey?.startsWith("nvapi-") || activeConfig.apiKey?.startsWith("gsk_") || activeConfig.apiKey?.startsWith("AIzaSy"))) {
+    // Auto-align provider only when in cloud mode or when explicit slash-format cloud model was chosen
+    if (activeConfig.provider !== "ollama" && activeConfig.model && (activeConfig.model.includes("/") || activeConfig.apiKey?.startsWith("nvapi-") || activeConfig.apiKey?.startsWith("gsk_") || activeConfig.apiKey?.startsWith("AIzaSy"))) {
       activeConfig.provider = "cloud";
     }
 
@@ -436,9 +436,11 @@ Assistant: Why do programmers prefer dark mode? Because light attracts bugs! ðŸ˜
                     OpenWork AI Copilot
                   </h3>
                   <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 font-bold uppercase">
-                    {(aiConfig.apiKey?.startsWith("nvapi-") || aiConfig.model?.includes("meta/") || aiConfig.model?.includes("nvidia/"))
+                    {aiConfig.provider === "ollama"
+                      ? "OLLAMA"
+                      : (aiConfig.apiKey?.startsWith("nvapi-") || aiConfig.model?.includes("meta/") || aiConfig.model?.includes("nvidia/"))
                       ? "NVIDIA NIM"
-                      : (aiConfig.apiKey?.startsWith("gsk_") ? "Groq" : (aiConfig.apiKey?.startsWith("AIzaSy") ? "Gemini" : aiConfig.provider))}
+                      : (aiConfig.apiKey?.startsWith("gsk_") ? "Groq" : (aiConfig.apiKey?.startsWith("AIzaSy") ? "Gemini" : "Cloud AI"))}
                   </span>
                 </div>
                 <p className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono truncate max-w-[190px]">
