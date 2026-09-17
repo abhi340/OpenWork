@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { setSoundEnabled as setGlobalSoundEnabled } from "@/lib/sound";
-import { detectModelsFromApiKey, detectOllamaModels, sendAIChatRequest } from "@/lib/ai";
+import { detectModelsFromApiKey, detectOllamaModels, sendAIChatRequest, extractValidHttpUrl } from "@/lib/ai";
 import { 
   User, 
   Settings, 
@@ -59,9 +59,14 @@ export default function EmployeeSettingsPage() {
   const isInitialOllama = aiConfig.provider === "ollama";
   const [aiProvider, setAiProvider] = useState<"ollama" | "cloud">(isInitialOllama ? "ollama" : "cloud");
   const [aiApiKey, setAiApiKey] = useState(aiConfig.apiKey || "");
-  const [aiBaseUrl, setAiBaseUrl] = useState(aiConfig.baseUrl || "");
+  const [ollamaEndpoint, setOllamaEndpoint] = useState(
+    aiConfig.ollamaUrl || (aiConfig.baseUrl && aiConfig.baseUrl.includes("11434") ? aiConfig.baseUrl : "http://127.0.0.1:11434")
+  );
+  const [customApiEndpoint, setCustomApiEndpoint] = useState(
+    aiConfig.baseUrl && !aiConfig.baseUrl.includes("11434") && !aiConfig.baseUrl.includes("cloudflared") ? aiConfig.baseUrl : ""
+  );
   const [aiModel, setAiModel] = useState(aiConfig.model || (isInitialOllama ? "llama3.2" : "gpt-4o-mini"));
-  const [showAdvancedUrl, setShowAdvancedUrl] = useState(Boolean(aiConfig.baseUrl && !aiConfig.baseUrl.includes("127.0.0.1")));
+  const [showAdvancedUrl, setShowAdvancedUrl] = useState(Boolean(aiConfig.baseUrl && !aiConfig.baseUrl.includes("127.0.0.1") && !aiConfig.baseUrl.includes("11434")));
 
   // Auto-detected Cloud & Ollama Models
   const [detectedProviderName, setDetectedProviderName] = useState<string>("");
@@ -137,7 +142,8 @@ export default function EmployeeSettingsPage() {
   const fetchOllamaModels = async () => {
     setIsDetecting(true);
     try {
-      const result = await detectOllamaModels(aiBaseUrl);
+      const sanitizedUrl = extractValidHttpUrl(ollamaEndpoint) || "http://127.0.0.1:11434";
+      const result = await detectOllamaModels(sanitizedUrl);
       setIsOllamaRunning(result.isConnected);
       setDetectedProviderName("Local Ollama");
 
@@ -166,7 +172,7 @@ export default function EmployeeSettingsPage() {
     if (aiProvider === "ollama") {
       fetchOllamaModels();
     } else if (aiApiKey) {
-      runAutoDetection(aiApiKey, aiBaseUrl);
+      runAutoDetection(aiApiKey, customApiEndpoint);
     }
   }, [aiProvider]);
 
@@ -177,7 +183,14 @@ export default function EmployeeSettingsPage() {
       setAiProvider(aiConfig.provider === "ollama" ? "ollama" : "cloud");
     }
     if (aiConfig.apiKey !== undefined) setAiApiKey(aiConfig.apiKey);
-    if (aiConfig.baseUrl !== undefined) setAiBaseUrl(aiConfig.baseUrl);
+    if (aiConfig.ollamaUrl) {
+      setOllamaEndpoint(aiConfig.ollamaUrl);
+    } else if (aiConfig.baseUrl && aiConfig.baseUrl.includes("11434")) {
+      setOllamaEndpoint(aiConfig.baseUrl);
+    }
+    if (aiConfig.baseUrl && !aiConfig.baseUrl.includes("11434") && !aiConfig.baseUrl.includes("cloudflared")) {
+      setCustomApiEndpoint(aiConfig.baseUrl);
+    }
   }, [aiConfig]);
 
   const [copiedTunnelCmd, setCopiedTunnelCmd] = useState<string | null>(null);
@@ -191,12 +204,10 @@ export default function EmployeeSettingsPage() {
   };
 
   // Handle field change and trigger auto-detect
-  const handleAIFieldChange = (field: "provider" | "apiKey" | "baseUrl" | "model", value: any) => {
+  const handleAIFieldChange = (field: "provider" | "apiKey" | "ollamaUrl" | "baseUrl" | "model", value: any) => {
     if (field === "provider") {
       setAiProvider(value);
       if (value === "ollama") {
-        const defaultOllamaUrl = aiConfig.baseUrl || "http://127.0.0.1:11434";
-        setAiBaseUrl(defaultOllamaUrl);
         if (!aiModel || aiModel.includes("gpt") || aiModel.includes("gemini")) {
           setAiModel("llama3.2");
         }
@@ -205,23 +216,32 @@ export default function EmployeeSettingsPage() {
           setAiModel("gpt-4o-mini");
         }
       }
+      updateAIConfig({ provider: value });
     }
 
     if (field === "apiKey") {
       setAiApiKey(value);
-      runAutoDetection(value, aiBaseUrl);
+      runAutoDetection(value, customApiEndpoint);
+      updateAIConfig({ apiKey: value.trim() });
+    }
+
+    if (field === "ollamaUrl") {
+      setOllamaEndpoint(value);
+      const sanitized = extractValidHttpUrl(value);
+      updateAIConfig({ ollamaUrl: sanitized || value, baseUrl: sanitized || value });
     }
 
     if (field === "baseUrl") {
-      setAiBaseUrl(value);
-      if (aiApiKey) runAutoDetection(aiApiKey, value);
+      setCustomApiEndpoint(value);
+      const sanitized = extractValidHttpUrl(value);
+      if (aiApiKey) runAutoDetection(aiApiKey, sanitized);
+      updateAIConfig({ baseUrl: sanitized });
     }
 
     if (field === "model") {
       setAiModel(value);
+      updateAIConfig({ model: value.trim() });
     }
-
-    updateAIConfig({ [field]: value });
   };
 
   const handleSaveAll = (e: React.FormEvent) => {
@@ -236,14 +256,15 @@ export default function EmployeeSettingsPage() {
       defaultSprintMins
     });
 
-    const effectiveBaseUrl = aiProvider === "ollama" 
-      ? (aiBaseUrl.trim() || "http://127.0.0.1:11434")
-      : aiBaseUrl.trim();
+    const sanitizedOllama = extractValidHttpUrl(ollamaEndpoint) || "http://127.0.0.1:11434";
+    const sanitizedCustom = extractValidHttpUrl(customApiEndpoint);
+    const effectiveBaseUrl = aiProvider === "ollama" ? sanitizedOllama : sanitizedCustom;
 
     updateAIConfig({
       provider: aiProvider,
       apiKey: aiApiKey.trim(),
       baseUrl: effectiveBaseUrl,
+      ollamaUrl: sanitizedOllama,
       model: aiModel.trim()
     });
 
@@ -256,15 +277,29 @@ export default function EmployeeSettingsPage() {
     setIsTestingAI(true);
     setAiTestResult(null);
 
-    const effectiveBaseUrl = aiProvider === "ollama" 
-      ? (aiBaseUrl.trim() || "http://127.0.0.1:11434")
-      : aiBaseUrl.trim();
+    // If user pasted a CLI command into the Ollama URL input
+    if (aiProvider === "ollama" && (ollamaEndpoint.includes("cloudflared tunnel") || ollamaEndpoint.includes("ngrok http"))) {
+      const extracted = extractValidHttpUrl(ollamaEndpoint);
+      if (!extracted) {
+        setAiTestResult({
+          success: false,
+          message: "You entered a terminal command! Run that command in your terminal/PowerShell first, then paste the generated https://... URL here."
+        });
+        setIsTestingAI(false);
+        return;
+      }
+    }
+
+    const sanitizedOllama = extractValidHttpUrl(ollamaEndpoint) || "http://127.0.0.1:11434";
+    const sanitizedCustom = extractValidHttpUrl(customApiEndpoint);
+    const effectiveBaseUrl = aiProvider === "ollama" ? sanitizedOllama : sanitizedCustom;
 
     // Persist active settings
     updateAIConfig({
       provider: aiProvider,
       apiKey: aiApiKey.trim(),
       baseUrl: effectiveBaseUrl,
+      ollamaUrl: sanitizedOllama,
       model: aiModel.trim()
     });
 
@@ -526,11 +561,19 @@ export default function EmployeeSettingsPage() {
                 </div>
                 <input
                   type="text"
-                  value={aiBaseUrl}
-                  onChange={(e) => handleAIFieldChange("baseUrl", e.target.value)}
+                  value={ollamaEndpoint}
+                  onChange={(e) => handleAIFieldChange("ollamaUrl", e.target.value)}
                   placeholder="http://127.0.0.1:11434 or https://your-tunnel.trycloudflare.com"
                   className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 shadow-2xs"
                 />
+                {ollamaEndpoint && (ollamaEndpoint.includes("cloudflared tunnel") || ollamaEndpoint.includes("ngrok http")) && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1.5 pt-1 animate-in fade-in">
+                    <AlertCircle size={13} className="flex-shrink-0 text-amber-500" />
+                    <span>
+                      Notice: That is a terminal command! Run that command in your terminal, then paste the generated <code>https://...</code> URL here.
+                    </span>
+                  </p>
+                )}
               </div>
 
               {/* Cloudflare Pages / HTTPS ➔ Localhost Guide Card */}
@@ -699,7 +742,7 @@ export default function EmployeeSettingsPage() {
                   <div className="mt-2 space-y-1 animate-in fade-in">
                     <input
                       type="text"
-                      value={aiBaseUrl}
+                      value={customApiEndpoint}
                       onChange={(e) => handleAIFieldChange("baseUrl", e.target.value)}
                       placeholder="e.g. https://openrouter.ai/api/v1 or https://api.groq.com/openai/v1"
                       className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"

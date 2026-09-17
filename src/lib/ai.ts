@@ -6,12 +6,33 @@ export interface ModelOption {
   providerName: string;
 }
 
+// Safely extract a valid http:// or https:// URL, even if user pasted a CLI command (e.g. "cloudflared tunnel --url https://...")
+export function extractValidHttpUrl(input?: string): string {
+  if (!input || typeof input !== "string") return "";
+  const trimmed = input.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    try {
+      new URL(trimmed);
+      return trimmed.replace(/\/+$/, "");
+    } catch {}
+  }
+  const match = trimmed.match(/(https?:\/\/[^\s'"]+)/);
+  if (match) {
+    try {
+      new URL(match[1]);
+      return match[1].replace(/\/+$/, "");
+    } catch {}
+  }
+  return "";
+}
+
 // Auto-detect provider & fetch real available models for any API key
 export async function detectModelsFromApiKey(apiKey: string, customBaseUrl = ""): Promise<{
   providerName: string;
   models: string[];
 }> {
   const cleanKey = apiKey.trim();
+  const sanitizedBaseUrl = extractValidHttpUrl(customBaseUrl);
   if (!cleanKey || cleanKey.length < 6) {
     return { providerName: "", models: [] };
   }
@@ -171,8 +192,9 @@ export async function detectOllamaModels(customBaseUrl = ""): Promise<{
   models: string[];
   activeUrl: string;
 }> {
-  const candidateHosts = customBaseUrl
-    ? [customBaseUrl.replace(/\/+$/, "")]
+  const sanitized = extractValidHttpUrl(customBaseUrl);
+  const candidateHosts = sanitized
+    ? [sanitized]
     : ["http://127.0.0.1:11434", "http://localhost:11434"];
 
   for (const host of candidateHosts) {
@@ -210,7 +232,7 @@ export async function sendAIChatRequest(params: {
 
   // A. Local Ollama Execution
   if (provider === "ollama") {
-    const rawUrl = (baseUrl || "").trim().replace(/\/+$/, "");
+    const rawUrl = extractValidHttpUrl(baseUrl);
     const isLocalUrl = !rawUrl || rawUrl.includes("127.0.0.1") || rawUrl.includes("localhost");
     const isTunnelUrl = rawUrl.startsWith("https://");
 
@@ -358,6 +380,7 @@ export async function sendAIChatRequest(params: {
   }
 
   // 2. Resilient Edge Proxy Execution (Groq, NVIDIA NIM, OpenAI, OpenRouter, Custom)
+  const validCustomEndpoint = extractValidHttpUrl(baseUrl);
   const proxyEndpoints = [
     "/api/ai/chat",
     "https://openwork.abhicm019.workers.dev/api/ai/chat"
@@ -371,7 +394,7 @@ export async function sendAIChatRequest(params: {
         body: JSON.stringify({
           provider: "cloud",
           apiKey: cleanKey,
-          baseUrl: baseUrl || "",
+          baseUrl: validCustomEndpoint,
           model: cleanModel,
           messages
         })
@@ -393,7 +416,7 @@ export async function sendAIChatRequest(params: {
   }
 
   // 3. Direct Browser fallback if proxies were unreachable
-  let targetEndpoint = baseUrl;
+  let targetEndpoint = validCustomEndpoint;
   if (!targetEndpoint) {
     if (cleanKey.startsWith("gsk_") || cleanModel.includes("llama-3.3-70b-versatile") || cleanModel.includes("mixtral")) {
       targetEndpoint = "https://api.groq.com/openai/v1";

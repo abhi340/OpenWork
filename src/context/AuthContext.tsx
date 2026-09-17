@@ -22,6 +22,7 @@ export interface AIConfig {
   provider: "ollama" | "cloud" | "openai" | "groq" | "openrouter" | "gemini" | "nvidia" | "custom";
   apiKey: string;
   baseUrl: string;
+  ollamaUrl?: string;
   model: string;
   isEnabled: boolean;
 }
@@ -84,6 +85,7 @@ const defaultAIConfig: AIConfig = {
   provider: "cloud",
   apiKey: "",
   baseUrl: "",
+  ollamaUrl: "http://127.0.0.1:11434",
   model: "gpt-4o-mini",
   isEnabled: true
 };
@@ -198,7 +200,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const savedAI = localStorage.getItem("openwork_ai_config");
       if (savedAI) {
-        setAIConfig((prev) => ({ ...prev, ...JSON.parse(savedAI) }));
+        const parsed = JSON.parse(savedAI);
+        if (parsed.baseUrl && (parsed.baseUrl.includes("cloudflared tunnel") || parsed.baseUrl.includes("ngrok http") || !parsed.baseUrl.startsWith("http"))) {
+          parsed.baseUrl = "";
+        }
+        if (parsed.ollamaUrl && (parsed.ollamaUrl.includes("cloudflared tunnel") || parsed.ollamaUrl.includes("ngrok http"))) {
+          const match = parsed.ollamaUrl.match(/(https?:\/\/[^\s'"]+)/);
+          parsed.ollamaUrl = match ? match[1] : "http://127.0.0.1:11434";
+        }
+        setAIConfig((prev) => ({ ...prev, ...parsed }));
       }
     } catch (e) {}
 
@@ -431,6 +441,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let nextConfig: AIConfig = { ...aiConfig, ...updates };
     setAIConfig((prev) => {
       nextConfig = { ...prev, ...updates };
+      if (nextConfig.baseUrl && (nextConfig.baseUrl.includes("cloudflared tunnel") || nextConfig.baseUrl.includes("ngrok http") || !nextConfig.baseUrl.startsWith("http"))) {
+        nextConfig.baseUrl = "";
+      }
+      if (nextConfig.ollamaUrl && (nextConfig.ollamaUrl.includes("cloudflared tunnel") || nextConfig.ollamaUrl.includes("ngrok http"))) {
+        const match = nextConfig.ollamaUrl.match(/(https?:\/\/[^\s'"]+)/);
+        nextConfig.ollamaUrl = match ? match[1] : "http://127.0.0.1:11434";
+      }
       try {
         localStorage.setItem("openwork_ai_config", JSON.stringify(nextConfig));
       } catch (e) {}

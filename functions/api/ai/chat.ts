@@ -14,6 +14,25 @@ export const onRequestOptions = async () => {
   });
 };
 
+function extractValidHttpUrl(input?: string): string {
+  if (!input || typeof input !== "string") return "";
+  const trimmed = input.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    try {
+      new URL(trimmed);
+      return trimmed.replace(/\/+$/, "");
+    } catch {}
+  }
+  const match = trimmed.match(/(https?:\/\/[^\s'"]+)/);
+  if (match) {
+    try {
+      new URL(match[1]);
+      return match[1].replace(/\/+$/, "");
+    } catch {}
+  }
+  return "";
+}
+
 export const onRequestPost = async (context: { env: any; request: Request }) => {
   try {
     const body: any = await context.request.json();
@@ -21,7 +40,8 @@ export const onRequestPost = async (context: { env: any; request: Request }) => 
 
     // 1. Local Ollama Execution
     if (provider === "ollama") {
-      const targetBase = (baseUrl || "http://127.0.0.1:11434").replace(/\/+$/, "");
+      const sanitizedUrl = extractValidHttpUrl(baseUrl);
+      const targetBase = (sanitizedUrl || "http://127.0.0.1:11434").replace(/\/+$/, "");
       const targetModel = model || "llama3.2";
 
       // If user supplied local loopback URL on the Cloudflare server, explain how to connect via tunnel
@@ -83,7 +103,7 @@ export const onRequestPost = async (context: { env: any; request: Request }) => 
     }
 
     // Determine target API endpoint & effective model
-    let targetEndpoint = baseUrl;
+    let targetEndpoint = extractValidHttpUrl(baseUrl);
     let isNvidia = cleanKey.startsWith("nvapi-") || cleanModel.startsWith("nvidia/") || cleanModel.startsWith("meta/llama-3.2") || cleanModel.startsWith("mistralai/") || cleanModel.startsWith("deepseek-ai/");
 
     if (!targetEndpoint) {
