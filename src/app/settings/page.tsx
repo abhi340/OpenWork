@@ -26,7 +26,9 @@ import {
   RefreshCw, 
   ChevronDown, 
   ChevronUp,
-  Zap
+  Zap,
+  Globe,
+  Copy
 } from "lucide-react";
 
 const AVATAR_PRESETS = [
@@ -107,9 +109,16 @@ export default function EmployeeSettingsPage() {
       setDetectedProviderName(result.providerName);
       setDetectedModels(result.models);
 
-      // Auto-select the first high-performance model if current model is empty or default
+      // Auto-select the first high-performance model if current model is empty, default, or retired
       if (result.models.length > 0) {
-        if (!aiModel || aiModel === "gpt-4o-mini" || !result.models.includes(aiModel)) {
+        const isCurrentInvalid = 
+          !aiModel || 
+          aiModel === "gpt-4o-mini" || 
+          aiModel === "llama3.2" || 
+          aiModel.includes("llama-3.3-70b") || 
+          !result.models.includes(aiModel);
+
+        if (isCurrentInvalid) {
           const defaultChoice = result.models[0];
           setAiModel(defaultChoice);
           updateAIConfig({ model: defaultChoice });
@@ -171,17 +180,27 @@ export default function EmployeeSettingsPage() {
     if (aiConfig.baseUrl !== undefined) setAiBaseUrl(aiConfig.baseUrl);
   }, [aiConfig]);
 
+  const [copiedTunnelCmd, setCopiedTunnelCmd] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string, label: string) => {
+    try {
+      navigator.clipboard.writeText(text);
+      setCopiedTunnelCmd(label);
+      setTimeout(() => setCopiedTunnelCmd(null), 2500);
+    } catch (e) {}
+  };
+
   // Handle field change and trigger auto-detect
   const handleAIFieldChange = (field: "provider" | "apiKey" | "baseUrl" | "model", value: any) => {
     if (field === "provider") {
       setAiProvider(value);
       if (value === "ollama") {
-        setAiBaseUrl("http://127.0.0.1:11434");
+        const defaultOllamaUrl = aiConfig.baseUrl || "http://127.0.0.1:11434";
+        setAiBaseUrl(defaultOllamaUrl);
         if (!aiModel || aiModel.includes("gpt") || aiModel.includes("gemini")) {
           setAiModel("llama3.2");
         }
       } else {
-        setAiBaseUrl("");
         if (!aiModel || aiModel === "llama3.2") {
           setAiModel("gpt-4o-mini");
         }
@@ -217,11 +236,15 @@ export default function EmployeeSettingsPage() {
       defaultSprintMins
     });
 
+    const effectiveBaseUrl = aiProvider === "ollama" 
+      ? (aiBaseUrl.trim() || "http://127.0.0.1:11434")
+      : aiBaseUrl.trim();
+
     updateAIConfig({
       provider: aiProvider,
-      apiKey: aiApiKey,
-      baseUrl: aiProvider === "ollama" ? "http://127.0.0.1:11434" : aiBaseUrl,
-      model: aiModel
+      apiKey: aiApiKey.trim(),
+      baseUrl: effectiveBaseUrl,
+      model: aiModel.trim()
     });
 
     setSavedSuccess(true);
@@ -233,19 +256,23 @@ export default function EmployeeSettingsPage() {
     setIsTestingAI(true);
     setAiTestResult(null);
 
+    const effectiveBaseUrl = aiProvider === "ollama" 
+      ? (aiBaseUrl.trim() || "http://127.0.0.1:11434")
+      : aiBaseUrl.trim();
+
     // Persist active settings
     updateAIConfig({
       provider: aiProvider,
-      apiKey: aiApiKey,
-      baseUrl: aiProvider === "ollama" ? "http://127.0.0.1:11434" : aiBaseUrl,
-      model: aiModel
+      apiKey: aiApiKey.trim(),
+      baseUrl: effectiveBaseUrl,
+      model: aiModel.trim()
     });
 
     const res = await sendAIChatRequest({
       provider: aiProvider,
-      apiKey: aiApiKey,
-      baseUrl: aiProvider === "ollama" ? "http://127.0.0.1:11434" : aiBaseUrl,
-      model: aiModel,
+      apiKey: aiApiKey.trim(),
+      baseUrl: effectiveBaseUrl,
+      model: aiModel.trim(),
       messages: [{ role: "user", content: "Respond with 'AI Copilot Connected!' in exactly 3 words." }]
     });
 
@@ -408,8 +435,9 @@ export default function EmployeeSettingsPage() {
 
           {/* Configuration Inputs */}
           {aiProvider === "ollama" ? (
-            /* Mode 1: Local Ollama (Model Name + Scan) */
-            <div className="space-y-3 pt-2">
+            /* Mode 1: Local Ollama (Model Name + Endpoint + Scan + Cloudflare Guide) */
+            <div className="space-y-4 pt-2">
+              {/* Field 1: Ollama Model Name */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -420,12 +448,12 @@ export default function EmployeeSettingsPage() {
                     {isOllamaRunning === true && (
                       <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 flex items-center gap-1 animate-in fade-in">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        <span>Ollama Running</span>
+                        <span>Ollama Connected</span>
                       </span>
                     )}
                     {isOllamaRunning === false && (
                       <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 flex items-center gap-1 animate-in fade-in">
-                        <span>Not Running</span>
+                        <span>Offline / Insecure Block</span>
                       </span>
                     )}
                   </div>
@@ -483,6 +511,77 @@ export default function EmployeeSettingsPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Field 2: Ollama Endpoint URL */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                    <Globe size={13} className="text-emerald-500" />
+                    <span>Ollama Endpoint URL</span>
+                  </label>
+                  <span className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">
+                    Local port or HTTPS tunnel
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  value={aiBaseUrl}
+                  onChange={(e) => handleAIFieldChange("baseUrl", e.target.value)}
+                  placeholder="http://127.0.0.1:11434 or https://your-tunnel.trycloudflare.com"
+                  className="w-full bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500 shadow-2xs"
+                />
+              </div>
+
+              {/* Cloudflare Pages / HTTPS ➔ Localhost Guide Card */}
+              <div className="p-4 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={15} className="text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                  <span className="text-xs font-bold text-blue-900 dark:text-blue-200">
+                    Using Ollama on Cloudflare (HTTPS)?
+                  </span>
+                </div>
+                <p className="text-[11px] text-blue-800/80 dark:text-blue-300/80 leading-relaxed">
+                  Web browsers automatically block HTTPS websites from directly connecting to insecure <code className="font-mono bg-blue-100 dark:bg-blue-900/60 px-1 py-0.5 rounded text-blue-900 dark:text-blue-200 font-semibold">http://localhost:11434</code> (Mixed Content Security Policy). To connect local Ollama from Cloudflare, run a free 1-line tunnel on your PC:
+                </p>
+
+                <div className="space-y-2">
+                  {/* Option 1: Free Cloudflare Tunnel */}
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800 flex items-center justify-between text-xs font-mono shadow-2xs">
+                    <div className="truncate text-slate-800 dark:text-zinc-200 text-[11px]">
+                      <span className="text-blue-500 font-bold font-sans mr-1.5">[Recommended]</span>
+                      <span>cloudflared tunnel --url http://localhost:11434</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard("cloudflared tunnel --url http://localhost:11434", "cloudflared")}
+                      className="px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-[10px] font-bold font-sans transition-colors cursor-pointer ml-2 flex-shrink-0 flex items-center gap-1"
+                    >
+                      {copiedTunnelCmd === "cloudflared" ? <Check size={12} /> : <Copy size={12} />}
+                      <span>{copiedTunnelCmd === "cloudflared" ? "Copied!" : "Copy"}</span>
+                    </button>
+                  </div>
+
+                  {/* Option 2: ngrok */}
+                  <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800 flex items-center justify-between text-xs font-mono shadow-2xs">
+                    <div className="truncate text-slate-800 dark:text-zinc-200 text-[11px]">
+                      <span className="text-purple-500 font-bold font-sans mr-1.5">[Alternative]</span>
+                      <span>ngrok http 11434</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyToClipboard("ngrok http 11434", "ngrok")}
+                      className="px-2.5 py-1 rounded-md bg-slate-200 dark:bg-zinc-800 hover:bg-slate-300 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 text-[10px] font-bold font-sans transition-colors cursor-pointer ml-2 flex-shrink-0 flex items-center gap-1"
+                    >
+                      {copiedTunnelCmd === "ngrok" ? <Check size={12} /> : <Copy size={12} />}
+                      <span>{copiedTunnelCmd === "ngrok" ? "Copied!" : "Copy"}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-blue-700 dark:text-blue-300">
+                  ⚡ Paste the generated <code className="font-mono bg-blue-100 dark:bg-blue-900/60 px-1 py-0.5 rounded text-blue-900 dark:text-blue-200 font-semibold">https://...trycloudflare.com</code> URL into the <strong>Ollama Endpoint URL</strong> field above, and click <strong>Test Connection</strong>!
+                </p>
               </div>
             </div>
           ) : (

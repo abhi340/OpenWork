@@ -1,4 +1,4 @@
-// Cloudflare Pages Function: /api/ai/chat
+// Cloudflare Edge Function: /api/ai/chat
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -19,11 +19,22 @@ export const onRequestPost = async (context: { env: any; request: Request }) => 
     const body: any = await context.request.json();
     const { provider = "cloud", apiKey = "", baseUrl = "", model = "", messages = [] } = body;
 
-    // 1. Local Ollama (Private local execution)
+    // 1. Local Ollama Execution
     if (provider === "ollama") {
-      const targetBase = baseUrl || "http://127.0.0.1:11434";
+      const targetBase = (baseUrl || "http://127.0.0.1:11434").replace(/\/+$/, "");
       const targetModel = model || "llama3.2";
 
+      // If user supplied local loopback URL on the Cloudflare server, explain how to connect via tunnel
+      if (targetBase.includes("127.0.0.1") || targetBase.includes("localhost")) {
+        return new Response(JSON.stringify({
+          error: "Cloudflare Server cannot reach local 127.0.0.1 on your PC. In a browser on HTTPS, browser security blocks direct insecure HTTP to localhost. To connect Ollama on Cloudflare: 1) Run 'cloudflared tunnel --url http://localhost:11434' (or 'ngrok http 11434'), 2) Paste the https:// URL into Settings -> Ollama Endpoint URL."
+        }), {
+          status: 400,
+          headers: corsHeaders
+        });
+      }
+
+      // User provided an HTTPS tunnel or remote Ollama URL
       try {
         const res = await fetch(`${targetBase}/v1/chat/completions`, {
           method: "POST",
@@ -36,7 +47,9 @@ export const onRequestPost = async (context: { env: any; request: Request }) => 
 
         if (!res.ok) {
           const err: any = await res.json().catch(() => ({ error: "Ollama Error" }));
-          return new Response(JSON.stringify({ error: err.error?.message || `Ollama unreachable at ${targetBase}. Ensure Ollama is running.` }), {
+          return new Response(JSON.stringify({
+            error: err.error?.message || err.detail || `Ollama returned HTTP ${res.status} from ${targetBase}.`
+          }), {
             status: res.status,
             headers: corsHeaders
           });
@@ -44,19 +57,21 @@ export const onRequestPost = async (context: { env: any; request: Request }) => 
 
         const data: any = await res.json();
         return new Response(JSON.stringify({
-          reply: data.choices?.[0]?.message?.content || "No reply generated."
+          reply: data.choices?.[0]?.message?.content || data.message?.content || "No reply generated."
         }), {
           headers: corsHeaders
         });
       } catch (err: any) {
-        return new Response(JSON.stringify({ error: `Could not connect to Local Ollama (${targetBase}). Is Ollama running locally?` }), {
+        return new Response(JSON.stringify({
+          error: `Could not connect to Ollama at ${targetBase} (${err.message}). Verify the tunnel URL is active.`
+        }), {
           status: 502,
           headers: corsHeaders
         });
       }
     }
 
-    // 2. Cloud AI Provider (Any model via API Key + Model Name)
+    // 2. Cloud AI Provider Execution
     const cleanKey = (apiKey || "").trim();
     const cleanModel = (model || "").trim();
 
@@ -67,13 +82,14 @@ export const onRequestPost = async (context: { env: any; request: Request }) => 
       });
     }
 
-    // Determine target API endpoint
+    // Determine target API endpoint & effective model
     let targetEndpoint = baseUrl;
+    let isNvidia = cleanKey.startsWith("nvapi-") || cleanModel.startsWith("nvidia/") || cleanModel.startsWith("meta/llama-3.2") || cleanModel.startsWith("mistralai/") || cleanModel.startsWith("deepseek-ai/");
 
     if (!targetEndpoint) {
-      if (cleanKey.startsWith("gsk_") || cleanModel.includes("llama-3.3") || cleanModel.includes("mixtral")) {
+      if (cleanKey.startsWith("gsk_") || cleanModel.includes("llama-3.3-70b-versatile") || cleanModel.includes("mixtral")) {
         targetEndpoint = "https://api.groq.com/openai/v1";
-      } else if (cleanKey.startsWith("nvapi-") || cleanModel.startsWith("nvidia/") || cleanModel.startsWith("meta/") || cleanModel.startsWith("mistralai/") || cleanModel.startsWith("deepseek-ai/")) {
+      } else if (isNvidia) {
         targetEndpoint = "https://integrate.api.nvidia.com/v1";
       } else if (cleanKey.startsWith("sk-or-") || cleanModel.includes("/")) {
         targetEndpoint = "https://openrouter.ai/api/v1";
@@ -114,23 +130,61 @@ export const onRequestPost = async (context: { env: any; request: Request }) => 
       }
     }
 
+    // Model selection with intelligent fallback
+    let effectiveModel = cleanModel;
+    if (isNvidia) {
+      // If user has an NVIDIA key but the model is empty, default gpt-4o, or the retired llama-3.3-70b, switch to active llama-3.2-11b
+      if (!effectiveModel || effectiveModel === "gpt-4o-mini" || effectiveModel.includes("llama-3.3-70b") || !effectiveModel.includes("/")) {
+        effectiveModel = "meta/llama-3.2-11b-vision-instruct";
+      }
+    } else if (!effectiveModel) {
+      effectiveModel = "gpt-4o-mini";
+    }
+
     // Standard OpenAI-compatible format
-    const effectiveModel = cleanModel || (cleanKey.startsWith("nvapi-") ? "deepseek-ai/deepseek-r1" : "gpt-4o-mini");
+    const requestPayload: any = {
+      model: effectiveModel,
+      messages: messages.map((m: any) => ({ role: m.role, content: m.content }))
+    };
+
+    // Add recommended parameters for NVIDIA NIM and Groq
+    if (isNvidia) {
+      requestPayload.max_tokens = 2048;
+      requestPayload.temperature = 0.7;
+    }
+
     const res = await fetch(`${targetEndpoint.replace(/\/+$/, "")}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Accept": "application/json",
         "Authorization": `Bearer ${cleanKey}`
       },
-      body: JSON.stringify({
-        model: effectiveModel,
-        messages: messages.map((m: any) => ({ role: m.role, content: m.content }))
-      })
+      body: JSON.stringify(requestPayload)
     });
 
     if (!res.ok) {
-      const err: any = await res.json().catch(() => ({ error: { message: "API Error" } }));
-      return new Response(JSON.stringify({ error: err.error?.message || err.detail || `AI Provider Error (${res.status})` }), {
+      const err: any = await res.json().catch(() => ({ error: { message: `AI Provider Error (${res.status})` } }));
+      
+      let errorMsg = 
+        (typeof err.detail === "string" ? err.detail : "") ||
+        err.error?.message ||
+        err.message ||
+        (err.title ? `${err.title}: ${JSON.stringify(err.detail || "")}` : "") ||
+        `AI Provider Error (${res.status})`;
+
+      // Specific actionable tips for NVIDIA NIM
+      if (isNvidia) {
+        if (res.status === 401 || res.status === 403) {
+          errorMsg = `NVIDIA NIM Authorization Failed (${res.status}): Please check that your nvapi-... key is active in your build.nvidia.com dashboard.`;
+        } else if (res.status === 410) {
+          errorMsg = `NVIDIA NIM Model Retired: ${errorMsg}. Please select 'meta/llama-3.2-11b-vision-instruct' or 'nvidia/llama-3.1-nemotron-70b-instruct'.`;
+        } else if (res.status === 404) {
+          errorMsg = `NVIDIA NIM Model '${effectiveModel}' Not Found (404). Please pick an active model from the dropdown.`;
+        }
+      }
+
+      return new Response(JSON.stringify({ error: errorMsg }), {
         status: res.status,
         headers: corsHeaders
       });
@@ -149,3 +203,4 @@ export const onRequestPost = async (context: { env: any; request: Request }) => 
     });
   }
 };
+
