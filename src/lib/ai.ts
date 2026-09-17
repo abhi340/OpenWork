@@ -230,12 +230,33 @@ export async function sendAIChatRequest(params: {
   const { provider = "cloud", apiKey = "", baseUrl = "", model = "", messages } = params;
   const isHttpsPage = typeof window !== "undefined" && window.location.protocol === "https:";
 
-  // A. Local Ollama Execution
-  if (provider === "ollama") {
-    const rawUrl = extractValidHttpUrl(baseUrl);
-    const isLocalUrl = !rawUrl || rawUrl.includes("127.0.0.1") || rawUrl.includes("localhost");
-    const isTunnelUrl = rawUrl.startsWith("https://");
+  const cleanKey = (apiKey || "").trim();
+  const cleanModel = (model || "").trim();
 
+  const isExplicitCloudModel =
+    cleanModel.includes("/") ||
+    cleanModel.startsWith("gpt-") ||
+    cleanModel.startsWith("gemini-") ||
+    cleanModel.startsWith("claude-") ||
+    cleanModel.startsWith("o1-") ||
+    cleanModel.startsWith("o3-");
+
+  const hasCloudKey = cleanKey.length > 8 && (
+    cleanKey.startsWith("nvapi-") ||
+    cleanKey.startsWith("gsk_") ||
+    cleanKey.startsWith("AIzaSy") ||
+    cleanKey.startsWith("sk-")
+  );
+
+  const rawUrl = extractValidHttpUrl(baseUrl);
+  const isLocalUrl = !rawUrl || rawUrl.includes("127.0.0.1") || rawUrl.includes("localhost");
+  const isTunnelUrl = rawUrl.startsWith("https://");
+
+  // Only attempt local Ollama if explicit cloud model wasn't requested
+  const shouldExecuteOllama = provider === "ollama" && !isExplicitCloudModel;
+
+  // A. Local Ollama Execution
+  if (shouldExecuteOllama) {
     // If on an HTTPS domain (e.g. Cloudflare) and user provided an HTTPS tunnel or remote server, proxy through edge
     if (isTunnelUrl) {
       const proxyEndpoints = [
@@ -327,24 +348,24 @@ export async function sendAIChatRequest(params: {
       }
     }
 
-    // If direct local fetch failed on an HTTPS host, explain Mixed Content security block
-    if (isHttpsPage && isLocalUrl) {
+    // If local Ollama is blocked by browser mixed-content or offline:
+    // If the user has a configured Cloud API key (e.g. NVIDIA NIM), seamlessly fall back to Cloud AI!
+    if (!hasCloudKey) {
+      if (isHttpsPage && isLocalUrl) {
+        return {
+          reply: "",
+          error: "Browser Security Block: Your browser blocks HTTPS pages (Cloudflare) from connecting to insecure 'http://127.0.0.1:11434'. To use Local Ollama on Cloudflare: 1) Run 'cloudflared tunnel --url http://localhost:11434' (or 'ngrok http 11434'), 2) Paste the https:// tunnel URL into Settings -> Ollama Endpoint URL."
+        };
+      }
+
       return {
         reply: "",
-        error: "Browser Security Block: Your browser blocks HTTPS pages (Cloudflare) from connecting to insecure 'http://127.0.0.1:11434'. To use Local Ollama on Cloudflare: 1) Run 'cloudflared tunnel --url http://localhost:11434' (or 'ngrok http 11434'), 2) Paste the https:// tunnel URL into Settings -> Ollama Endpoint URL."
+        error: `Could not connect to Ollama (${candidateHosts[0]}). Make sure Ollama is running and OLLAMA_ORIGINS="*" is set.`
       };
     }
-
-    return {
-      reply: "",
-      error: `Could not connect to Ollama (${candidateHosts[0]}). Make sure Ollama is running and OLLAMA_ORIGINS="*" is set.`
-    };
   }
 
   // B. Cloud AI Execution
-  const cleanKey = (apiKey || "").trim();
-  const cleanModel = (model || "").trim();
-
   if (!cleanKey) {
     return { reply: "", error: "Please enter your AI API key in Settings." };
   }

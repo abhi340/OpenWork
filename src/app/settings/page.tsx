@@ -126,7 +126,8 @@ export default function EmployeeSettingsPage() {
         if (isCurrentInvalid) {
           const defaultChoice = result.models[0];
           setAiModel(defaultChoice);
-          updateAIConfig({ model: defaultChoice });
+          setAiProvider("cloud");
+          updateAIConfig({ provider: "cloud", model: defaultChoice });
         }
       }
     } catch (e) {
@@ -208,15 +209,16 @@ export default function EmployeeSettingsPage() {
     if (field === "provider") {
       setAiProvider(value);
       if (value === "ollama") {
-        if (!aiModel || aiModel.includes("gpt") || aiModel.includes("gemini")) {
-          setAiModel("llama3.2");
-        }
+        const defaultOllama = "llama3.2";
+        setAiModel(defaultOllama);
+        updateAIConfig({ provider: "ollama", model: defaultOllama });
       } else {
-        if (!aiModel || aiModel === "llama3.2") {
-          setAiModel("gpt-4o-mini");
-        }
+        const cloudChoice = detectedModels.length > 0 && !detectedModels[0].includes(":")
+          ? detectedModels[0]
+          : (aiApiKey.startsWith("nvapi-") ? "meta/llama-3.2-11b-vision-instruct" : "gpt-4o-mini");
+        setAiModel(cloudChoice);
+        updateAIConfig({ provider: "cloud", model: cloudChoice });
       }
-      updateAIConfig({ provider: value });
     }
 
     if (field === "apiKey") {
@@ -240,7 +242,13 @@ export default function EmployeeSettingsPage() {
 
     if (field === "model") {
       setAiModel(value);
-      updateAIConfig({ model: value.trim() });
+      const isCloud = value.includes("/") || value.startsWith("gpt-") || value.startsWith("gemini-") || value.startsWith("claude-") || value.startsWith("o1-") || value.startsWith("o3-");
+      if (isCloud) {
+        setAiProvider("cloud");
+        updateAIConfig({ model: value.trim(), provider: "cloud" });
+      } else {
+        updateAIConfig({ model: value.trim() });
+      }
     }
   };
 
