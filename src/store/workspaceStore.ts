@@ -34,12 +34,15 @@ export interface WorkBlock {
   order_index: number;
 }
 
+export type NewWorkBlock = Omit<WorkBlock, 'id' | 'order_index'> & { order_index?: number };
+
 interface WorkspaceState {
   blocks: WorkBlock[];
   activeBlockId: string | null;
   isLoading: boolean;
   fetchBlocks: () => Promise<void>;
-  addBlock: (block: Omit<WorkBlock, 'id'>) => Promise<void>;
+  addBlock: (block: NewWorkBlock) => Promise<void>;
+  addBlocks: (blocks: NewWorkBlock[]) => Promise<void>;
   removeBlock: (id: string) => Promise<void>;
   updateBlock: (id: string, updates: Partial<WorkBlock>) => Promise<void>;
   clearAllBlocks: () => Promise<void>;
@@ -92,7 +95,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       set({ isLoading: true });
       const currentUserId = getCurrentUserId();
 
-      // Cloud Firestore query
+      // 1. Cloud Firestore query
       try {
         const blocksQuery = query(
           collection(db, "daily_blocks"),
@@ -121,10 +124,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           return;
         }
       } catch (firestoreErr) {
-        console.warn("Firestore fetch fallback to cache:", firestoreErr);
+        console.warn("Firestore fetch fallback to D1/cache:", firestoreErr);
       }
 
-      // Fallback to local cached blocks
+      // 2. Cloudflare D1 fallback
+      try {
+        const d1Res = await fetch(`/api/blocks?userId=${encodeURIComponent(currentUserId)}`);
+        if (d1Res.ok) {
+          const d1Data = await d1Res.json();
+          if (Array.isArray(d1Data.blocks) && d1Data.blocks.length > 0) {
+            set({ blocks: d1Data.blocks, isLoading: false });
+            saveCachedBlocks(d1Data.blocks);
+            return;
+          }
+        }
+      } catch (d1Err) {
+        // Continue to local storage
+      }
+
+      // 3. Fallback to local cached blocks
       const cached = getCachedBlocks();
       set({ blocks: cached, isLoading: false });
     } catch (err) {
@@ -155,7 +173,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ blocks: nextBlocks });
     saveCachedBlocks(nextBlocks);
 
-    // 2. Sync with Cloud Firestore
+    // 2. Sync to Cloudflare D1
+    try {
+      fetch("/api/blocks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: block.id,
+          userId: currentUserId,
+          date: targetDate,
+          title: block.title,
+          type: block.type,
+          config: block.config || {},
+          items: block.items || [],
+          order_index: block.order_index
+        })
+      }).catch(() => {});
+    } catch (e) {}
+
+    // 3. Sync with Cloud Firestore
     try {
       const blockRef = doc(db, "daily_blocks", id);
       await setDoc(blockRef, {
@@ -175,6 +211,74 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
+  addBlocks: async (newBlocks) => {
+    if (!newBlocks || newBlocks.length === 0) return;
+    const currentUserId = getCurrentUserId();
+    const currentBlocks = get().blocks;
+    const startIndex = currentBlocks.length;
+
+    const createdBlocks: WorkBlock[] = newBlocks.map((nb, i) => {
+      const id = "block_" + Math.random().toString(36).substring(2, 9) + Date.now().toString(36) + "_" + i;
+      const targetDate = nb.config?.date || new Date().toISOString().split("T")[0];
+      return {
+        id,
+        ...nb,
+        order_index: startIndex + i,
+        config: {
+          ...nb.config,
+          userId: currentUserId,
+          date: targetDate
+        }
+      };
+    });
+
+    // 1. Single atomic optimistic update
+    const nextBlocks = [...currentBlocks, ...createdBlocks];
+    set({ blocks: nextBlocks });
+    saveCachedBlocks(nextBlocks);
+
+    // 2. Sync to Cloudflare D1
+    for (const b of createdBlocks) {
+      try {
+        fetch("/api/blocks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: b.id,
+            userId: currentUserId,
+            date: b.config.date,
+            title: b.title,
+            type: b.type,
+            config: b.config || {},
+            items: b.items || [],
+            order_index: b.order_index
+          })
+        }).catch(() => {});
+      } catch (e) {}
+    }
+
+    // 3. Sync to Cloud Firestore
+    for (const b of createdBlocks) {
+      try {
+        const blockRef = doc(db, "daily_blocks", b.id);
+        await setDoc(blockRef, {
+          id: b.id,
+          userId: currentUserId,
+          date: b.config.date,
+          title: b.title,
+          type: b.type,
+          config: b.config || {},
+          items: b.items || [],
+          order_index: b.order_index,
+          created_at: serverTimestamp(),
+          updated_at: serverTimestamp()
+        });
+      } catch (err) {
+        console.warn("Could not sync batch block creation to Cloud Firestore:", err);
+      }
+    }
+  },
+
   removeBlock: async (id) => {
     // 1. Optimistic local update
     const nextBlocks = get().blocks.filter((b) => b.id !== id);
@@ -184,7 +288,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     saveCachedBlocks(nextBlocks);
 
-    // 2. Sync with Cloud Firestore
+    // 2. Sync to Cloudflare D1
+    try {
+      fetch(`/api/blocks?id=${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => {});
+    } catch (e) {}
+
+    // 3. Sync with Cloud Firestore
     try {
       const blockRef = doc(db, "daily_blocks", id);
       await deleteDoc(blockRef);
@@ -199,7 +308,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ blocks: nextBlocks });
     saveCachedBlocks(nextBlocks);
 
-    // 2. Sync with Cloud Firestore
+    // 2. Sync to Cloudflare D1
+    try {
+      fetch("/api/blocks", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...updates })
+      }).catch(() => {});
+    } catch (e) {}
+
+    // 3. Sync with Cloud Firestore
     try {
       const blockRef = doc(db, "daily_blocks", id);
       await updateDoc(blockRef, {
@@ -215,6 +333,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const currentBlocks = get().blocks;
     set({ blocks: [], activeBlockId: null });
     saveCachedBlocks([]);
+
+    for (const block of currentBlocks) {
+      try {
+        fetch(`/api/blocks?id=${encodeURIComponent(block.id)}`, { method: "DELETE" }).catch(() => {});
+      } catch (e) {}
+    }
 
     try {
       for (const block of currentBlocks) {
@@ -251,9 +375,18 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
               order_index: data.order_index ?? 0
             });
           });
-          syncedBlocks.sort((a, b) => a.order_index - b.order_index);
-          set({ blocks: syncedBlocks });
-          saveCachedBlocks(syncedBlocks);
+
+          // Safe local merge: preserve any local blocks not yet reflected in Firestore
+          const currentLocal = get().blocks;
+          const merged = [...syncedBlocks];
+          for (const localBlock of currentLocal) {
+            if (!merged.some((b) => b.id === localBlock.id)) {
+              merged.push(localBlock);
+            }
+          }
+          merged.sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+          set({ blocks: merged });
+          saveCachedBlocks(merged);
         }
       }, (err) => {
         console.warn("Firestore realtime listener error:", err);

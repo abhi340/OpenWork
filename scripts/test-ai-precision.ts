@@ -411,6 +411,51 @@ To start the timer, simply say "Start bug fixing timer". Once you've completed t
       expectedBlockCount: 1,
       cleanContentShouldNotContain: ["config:", "initialDuration"]
     }
+  },
+  {
+    name: "Unbracketed Multiple BLOCKS Payload Recovery",
+    userPrompt: "add 2 counters",
+    modelOutput: `Here are your two counters:
+<<<BLOCKS: {"type": "counter_batch", "title": "ProptechBuzz Jobs", "config": {"target": 10}}, {"type": "counter_batch", "title": "WildlifeBuzz Jobs", "config": {"target": 10}}>>>`,
+    expected: {
+      hasBlocks: true,
+      expectedBlockCount: 2,
+      cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
+    }
+  },
+  {
+    name: "Multiple Separate BLOCKS Tags in Single Output",
+    userPrompt: "add a timer and a counter",
+    modelOutput: `Added both tools for you:
+<<<BLOCKS: [{"type": "timer_task", "title": "Sprint Timer"}]>>>
+<<<BLOCKS: [{"type": "counter_batch", "title": "Review Counter"}]>>>`,
+    expected: {
+      hasBlocks: true,
+      expectedBlockCount: 2,
+      cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
+    }
+  },
+  {
+    name: "Deterministic Multi-Counter Request with 2 Entities",
+    userPrompt: "add 2 counters: WildlifeBuzz and ProptechBuzz",
+    modelOutput: "Sure! I have prepared the counters for WildlifeBuzz and ProptechBuzz.",
+    expected: {
+      hasBlocks: true,
+      blockType: "counter_batch",
+      expectedBlockCount: 2,
+      cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
+    }
+  },
+  {
+    name: "Deterministic Comparative Widget Request (the same for ProptechBuzz)",
+    userPrompt: "i am unable to add the same for ProptechBuzz",
+    modelOutput: "I'll add the same counter for ProptechBuzz now.",
+    expected: {
+      hasBlocks: true,
+      blockType: "counter_batch",
+      expectedBlockCount: 1,
+      cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
+    }
   }
 ];
 

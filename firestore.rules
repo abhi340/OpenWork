@@ -108,7 +108,7 @@ service cloud.firestore {
              data.userId is string && data.userId == request.auth.uid &&
              data.date is string && data.date.size() == 10 &&
              data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
-             data.type in ['focus', 'scratchpad', 'links', 'tasks', 'metric', 'routine'] &&
+             data.type in ['counter_batch', 'timer_task', 'table', 'checklist', 'pipeline_flow', 'metric_kpi', 'link_hub', 'date_milestones', 'rich_doc', 'focus', 'scratchpad', 'links', 'tasks', 'metric', 'routine'] &&
              (!('config' in data) || data.config is map) &&
              (!('items' in data) || (data.items is list && data.items.size() <= 100)) &&
              (!('order_index' in data) || (data.order_index is number && data.order_index >= 0));

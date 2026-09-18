@@ -50,7 +50,7 @@ interface Message {
 
 export function FloatingAICopilot() {
   const { aiConfig } = useAuth();
-  const { blocks, addBlock, removeBlock, clearAllBlocks } = useWorkspaceStore();
+  const { blocks, addBlock, addBlocks, removeBlock, clearAllBlocks } = useWorkspaceStore();
   
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -120,33 +120,13 @@ export function FloatingAICopilot() {
     setInput("");
     setIsLoading(true);
 
-    const cleanLower = textToSend.toLowerCase().replace(/[^a-z0-9\s-]/g, "").trim();
+    // Auto-scroll to bottom
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
 
-    // 1. Instant Action: Casual Greetings & Check-in
-    if (["hi", "hgi", "hello", "hey", "hey there", "hola", "yo", "good morning", "good afternoon", "good evening", "what can you do", "help"].includes(cleanLower)) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: "👋 Hey! I'm ready to help you organize and drive today's work.\n\nTell me what you're working on (*e.g., 'Draft founder story at 6pm', 'Add 50 cold calls goal', 'Bug triage sprint'*) or ask me to modify your board, and I'll construct it immediately."
-        }
-      ]);
-      setIsLoading(false);
-      return;
-    }
+    const cleanLower = textToSend.toLowerCase().trim();
 
-    // 2. Direct Clear Board command
-    if (
-      cleanLower === "clear the dashboard" ||
-      cleanLower === "clear dashboard" ||
-      cleanLower === "clear the board" ||
-      cleanLower === "clear board" ||
-      cleanLower === "reset the board" ||
-      cleanLower === "reset board" ||
-      cleanLower === "delete all blocks" ||
-      cleanLower === "delete all widgets"
-    ) {
+    // 1. Direct Clear Board Command
+    if (cleanLower === "clear board" || cleanLower === "clear my board" || cleanLower === "delete all widgets") {
       await clearAllBlocks();
       setMessages((prev) => [
         ...prev,
@@ -154,6 +134,26 @@ export function FloatingAICopilot() {
           id: crypto.randomUUID(),
           role: "assistant",
           content: "✨ Your execution board has been completely cleared."
+        }
+      ]);
+      setIsLoading(false);
+      return;
+    }
+
+    // 2. Direct Specific Date Removal command
+    const dateMatch = cleanLower.match(/(?:delete|clear|remove)\s+(?:all\s+)?(?:widgets?\s+)?(?:on\s+|for\s+)?(\d{4}-\d{2}-\d{2})/);
+    if (dateMatch) {
+      const targetDate = dateMatch[1];
+      const matching = blocks.filter((b) => b.config?.date === targetDate);
+      for (const b of matching) {
+        await removeBlock(b.id);
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `🗑️ Removed ${matching.length} widget${matching.length === 1 ? "" : "s"} scheduled for ${targetDate}.`
         }
       ]);
       setIsLoading(false);
@@ -200,11 +200,13 @@ export function FloatingAICopilot() {
       activeConfig.provider = "cloud";
     }
 
-    // Build context from active board blocks
+    // Build context from active board blocks including configuration details
     const boardContext = blocks.length > 0 
       ? blocks.map((b) => {
           const dateTag = b.config?.date ? ` | Date: "${b.config.date}"` : " | Date: All";
-          return `- ID: "${b.id}" | Title: "${b.title}" | Type: "${b.type}"${dateTag}`;
+          const cfg = b.config ? ` | Config: ${JSON.stringify(b.config)}` : "";
+          const itm = b.items && b.items.length > 0 ? ` | Items: ${JSON.stringify(b.items)}` : "";
+          return `- ID: "${b.id}" | Title: "${b.title}" | Type: "${b.type}"${dateTag}${cfg}${itm}`;
         }).join("\n")
       : "Board is currently empty.";
 
@@ -216,7 +218,10 @@ ${boardContext}
 COMMUNICATION RULES:
 1. GENERAL CONVERSATION & QUESTIONS: If the user asks a general question, joke, explanation, advice, or casual chat (e.g. "tell me a joke", "what is this", "how to prioritize"), answer naturally, helpfully, and concisely in markdown. DO NOT output any <<<BLOCKS>>> or <<<ACTION>>> tags for normal conversation.
 2. WIDGET & TASK CREATION: When the user asks to create, add, or set up widgets or workflows, ALWAYS output valid JSON inside <<<BLOCKS: [...]>>> tags.
-3. Keep conversational replies punchy, professional, and directly useful.
+3. MULTIPLE WIDGETS & COMPARATIVE REQUESTS:
+   - When the user asks for multiple widgets (e.g. "add 2 counters: WildlifeBuzz and ProptechBuzz", "add timer and checklist"), include ALL requested widgets in the <<<BLOCKS: [...]>>> array.
+   - When the user asks "add the same for [Entity]", "another counter for [Entity]", or refers to an existing widget, inspect "Current Board State" above. Replicate the widget type and configuration (e.g. same target, unit, duration, stages) with the new entity's title!
+4. Keep conversational replies punchy, professional, and directly useful.
 
 DASHBOARD WIDGET FORMATS (ALWAYS use <<<BLOCKS: [...]>>> with clean JSON):
 - Timer / Pomodoro: <<<BLOCKS: [{"type": "timer_task", "title": "Bug Fixing Timer", "config": {"initialDuration": 1500, "timeRemaining": 1500, "isRunning": false}}]>>>
@@ -238,6 +243,12 @@ Assistant: Created your 25-minute bug fixing timer. <<<BLOCKS: [{"type": "timer_
 
 User: "create a counter for 50 outreach calls"
 Assistant: Added your outreach calls counter. <<<BLOCKS: [{"type": "counter_batch", "title": "Outreach Calls Tracker", "config": {"target": 50, "unit": "calls", "count": 0}}]>>>
+
+User: "add 2 counters: WildlifeBuzz Jobs and ProptechBuzz Jobs with target 10"
+Assistant: Created both counters for you. <<<BLOCKS: [{"type": "counter_batch", "title": "WildlifeBuzz Jobs", "config": {"target": 10, "unit": "Jobs", "count": 0}}, {"type": "counter_batch", "title": "ProptechBuzz Jobs", "config": {"target": 10, "unit": "Jobs", "count": 0}}]>>>
+
+User: "add the same for ProptechBuzz"
+Assistant: Added ProptechBuzz with the same counter target. <<<BLOCKS: [{"type": "counter_batch", "title": "ProptechBuzz Jobs", "config": {"target": 10, "unit": "Jobs", "count": 0}}]>>>
 
 User: "tell me a joke"
 Assistant: Why do programmers prefer dark mode? Because light attracts bugs! 😄`;
@@ -366,14 +377,9 @@ Assistant: Why do programmers prefer dark mode? Because light attracts bugs! �
     };
   };
 
-  const handleApplyAllBlocks = (blocksToApply: GeneratedBlock[], msgId: string) => {
-    blocksToApply.forEach((b, idx) => {
-      const clean = sanitizeBlockForCreation(b);
-      addBlock({
-        ...clean,
-        order_index: blocks.length + idx
-      });
-    });
+  const handleApplyAllBlocks = async (blocksToApply: GeneratedBlock[], msgId: string) => {
+    const cleanedList = blocksToApply.map((b) => sanitizeBlockForCreation(b));
+    await addBlocks(cleanedList);
     setAppliedProposalId(msgId);
     setTimeout(() => setAppliedProposalId(null), 3000);
   };

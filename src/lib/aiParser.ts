@@ -50,7 +50,7 @@ export function normalizeBlockType(rawType: string): BlockType {
   return "checklist";
 }
 
-// Resilient JSON cleaner for LLM outputs (handles single quotes, trailing commas, unquoted keys)
+// Resilient JSON cleaner for LLM outputs (handles single quotes, trailing commas, unquoted keys, unbracketed lists)
 export function sanitizeAndParseJSON<T = any>(rawJson: string): T | null {
   if (!rawJson) return null;
   const clean = rawJson.trim();
@@ -60,7 +60,14 @@ export function sanitizeAndParseJSON<T = any>(rawJson: string): T | null {
     return JSON.parse(clean);
   } catch (e) {}
 
-  // 2. Fix relaxed JSON syntax
+  // 2. Wrap unbracketed object list e.g. `{...}, {...}` -> `[{...}, {...}]`
+  if (!clean.startsWith("[") && clean.startsWith("{")) {
+    try {
+      return JSON.parse(`[${clean}]`);
+    } catch (e) {}
+  }
+
+  // 3. Fix relaxed JSON syntax
   try {
     let fixed = clean
       // Replace single quotes around keys or values with double quotes
@@ -70,7 +77,13 @@ export function sanitizeAndParseJSON<T = any>(rawJson: string): T | null {
       // Quote unquoted keys (e.g. { title: "Test" } -> { "title": "Test" })
       .replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
 
-    return JSON.parse(fixed);
+    try {
+      return JSON.parse(fixed);
+    } catch (e) {
+      if (!fixed.startsWith("[") && fixed.startsWith("{")) {
+        return JSON.parse(`[${fixed}]`);
+      }
+    }
   } catch (e) {}
 
   return null;
@@ -110,62 +123,62 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
 
   // Guard: Casual conversation / questions must NOT trigger deterministic block creation
   const isQuestionOrChat = /^(?:tell me|what is|how do|why |can you explain|explain|who is|joke|help\b|hi\b|hello\b|hey\b)/i.test(userPrompt.trim());
-  const hasCreationKeyword = /(?:add|create|build|make|set up|setup|start|track|insert|generate|new)\b/i.test(promptLower);
+  const hasCreationKeyword = /(?:add|create|build|make|set up|setup|start|track|insert|generate|new|unable to add|same for)\b/i.test(promptLower);
 
   if (isQuestionOrChat && !hasCreationKeyword) {
     return null;
   }
 
-  // 1. TIMER / POMODORO / STOPWATCH
-  const isTimerRequest = /(?:timer|pomodoro|stopwatch|focus\s*sprint|focus\s*session)/i.test(promptLower) ||
-    /\b\d+\s*(?:min|minute|m|hour|hr)s?\s*(?:timer|sprint|focus)\b/i.test(promptLower);
+  const results: ParsedBlock[] = [];
 
-  if (isTimerRequest) {
-    // Extract duration
-    let durationSeconds = 25 * 60; // default 25 min
-    const hourMatch = combined.match(/(\d+)\s*(?:hour|hours|hr|hrs|h\b)/i);
-    const minMatch = combined.match(/(\d+)\s*(?:min|mins|minute|minutes|m\b)/i);
-    const secMatch = combined.match(/(\d+)\s*(?:sec|secs|second|seconds|s\b)/i);
-
-    if (hourMatch) {
-      durationSeconds = parseInt(hourMatch[1], 10) * 3600;
-    } else if (minMatch) {
-      durationSeconds = parseInt(minMatch[1], 10) * 60;
-    } else if (secMatch) {
-      durationSeconds = parseInt(secMatch[1], 10);
+  // A. Comparative or "Same for X" Widget Request (e.g. "unable to add the same for ProptechBuzz", "same for WildlifeBuzz")
+  const sameMatch = userPrompt.match(/(?:the\s+)?same\s+for\s+([^,.\n?]+)/i);
+  if (sameMatch) {
+    let candidate = sameMatch[1].replace(/["']/g, "").trim();
+    if (candidate.length > 0) {
+      const title = candidate.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+      results.push({
+        type: "counter_batch",
+        title: title.toLowerCase().includes("jobs") || title.toLowerCase().includes("tracker") || title.toLowerCase().includes("counter") ? title : `${title} Jobs`,
+        config: {
+          target: 10,
+          unit: "tasks",
+          count: 0
+        }
+      });
     }
-
-    // Extract title (e.g. "for bug fixing" -> "Bug Fixing", "deep work" -> "Deep Work")
-    let title = "Focus Sprint Timer";
-    const forMatch = userPrompt.match(/(?:for|on|named|called)\s+([^,.\n]+)/i);
-    if (forMatch) {
-      const candidate = forMatch[1].replace(/(?:timer|session|task)/gi, "").trim();
-      if (candidate.length > 1) {
-        title = candidate.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
-      }
-    } else {
-      const cleanPrompt = userPrompt.replace(/(?:add|create|set up|setup|a|an|\d+|min|mins|minutes|minute|hour|hours|timer|pomodoro|stopwatch)/gi, "").trim();
-      if (cleanPrompt.length >= 3) {
-        title = cleanPrompt.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
-      }
-    }
-
-    return [{
-      type: "timer_task",
-      title: title.endsWith("Timer") ? title : `${title} Timer`,
-      config: {
-        initialDuration: durationSeconds,
-        timeRemaining: durationSeconds,
-        isRunning: false
-      }
-    }];
   }
 
-  // 2. COUNTER / BATCH TRACKER
+  // B. Multi-entity Counter Request (e.g. "add 2 counters: WildlifeBuzz and ProptechBuzz" or "counters for A and B")
+  const multiEntityMatch = userPrompt.match(/(?:(?:add\s+)?(?:2|two|\d+)\s+counters?[:\s]+|(?:counters?\s+(?:for|named|called)\s+))([^,.\n]+(?:\band\b|[,;&])[^,.\n]+)/i);
+  if (multiEntityMatch && results.length === 0) {
+    const rawEntities = multiEntityMatch[1];
+    const parts = rawEntities
+      .split(/\band\b|[,;&]/i)
+      .map((s) => s.replace(/(?:one for|another for|a counter for|counter for|jobs for)/gi, "").trim())
+      .filter((s) => s.length > 1);
+
+    if (parts.length >= 2) {
+      for (const part of parts) {
+        const cleanTitle = part.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+        results.push({
+          type: "counter_batch",
+          title: cleanTitle.toLowerCase().includes("tracker") || cleanTitle.toLowerCase().includes("counter") || cleanTitle.toLowerCase().includes("jobs") ? cleanTitle : `${cleanTitle} Jobs`,
+          config: {
+            target: 10,
+            unit: "tasks",
+            count: 0
+          }
+        });
+      }
+    }
+  }
+
+  // C. Single Counter / Batch Tracker (if not already satisfied by multi-entity or comparative)
   const isCounterRequest = /(?:counter|tally|batch\s*tracker|call\s*tracker)/i.test(promptLower) ||
     /\b\d+\s*(?:calls|leads|tickets|prs|tasks|reps|outreach|emails)\b/i.test(promptLower);
 
-  if (isCounterRequest && hasCreationKeyword) {
+  if (isCounterRequest && hasCreationKeyword && results.filter(r => r.type === "counter_batch").length === 0) {
     let target = 20;
     let unit = "calls";
     const targetMatch = combined.match(/(\d+)\s*([a-zA-Z]+)?/);
@@ -185,7 +198,7 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
       }
     }
 
-    return [{
+    results.push({
       type: "counter_batch",
       title: title.endsWith("Tracker") || title.endsWith("Counter") ? title : `${title} Tracker`,
       config: {
@@ -193,12 +206,55 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
         unit,
         count: 0
       }
-    }];
+    });
   }
 
-  // 3. METRIC KPI GOAL
+  // D. Timer / Pomodoro / Stopwatch
+  const isTimerRequest = /(?:timer|pomodoro|stopwatch|focus\s*sprint|focus\s*session)/i.test(promptLower) ||
+    /\b\d+\s*(?:min|minute|m|hour|hr)s?\s*(?:timer|sprint|focus)\b/i.test(promptLower);
+
+  if (isTimerRequest && !results.some(r => r.type === "timer_task")) {
+    let durationSeconds = 25 * 60; // default 25 min
+    const hourMatch = combined.match(/(\d+)\s*(?:hour|hours|hr|hrs|h\b)/i);
+    const minMatch = combined.match(/(\d+)\s*(?:min|mins|minute|minutes|m\b)/i);
+    const secMatch = combined.match(/(\d+)\s*(?:sec|secs|second|seconds|s\b)/i);
+
+    if (hourMatch) {
+      durationSeconds = parseInt(hourMatch[1], 10) * 3600;
+    } else if (minMatch) {
+      durationSeconds = parseInt(minMatch[1], 10) * 60;
+    } else if (secMatch) {
+      durationSeconds = parseInt(secMatch[1], 10);
+    }
+
+    let title = "Focus Sprint Timer";
+    const forMatch = userPrompt.match(/(?:for|on|named|called)\s+([^,.\n]+)/i);
+    if (forMatch) {
+      const candidate = forMatch[1].replace(/(?:timer|session|task)/gi, "").trim();
+      if (candidate.length > 1) {
+        title = candidate.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+      }
+    } else {
+      const cleanPrompt = userPrompt.replace(/(?:add|create|set up|setup|a|an|\d+|min|mins|minutes|minute|hour|hours|timer|pomodoro|stopwatch)/gi, "").trim();
+      if (cleanPrompt.length >= 3) {
+        title = cleanPrompt.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+      }
+    }
+
+    results.push({
+      type: "timer_task",
+      title: title.endsWith("Timer") ? title : `${title} Timer`,
+      config: {
+        initialDuration: durationSeconds,
+        timeRemaining: durationSeconds,
+        isRunning: false
+      }
+    });
+  }
+
+  // E. Metric KPI Goal
   const isKpiRequest = /(?:kpi|metric|revenue|mrr|arr|\$\s*\d+|\d+\s*k\s*(?:revenue|mrr|goal))/i.test(promptLower);
-  if (isKpiRequest && hasCreationKeyword) {
+  if (isKpiRequest && hasCreationKeyword && !results.some(r => r.type === "metric_kpi")) {
     let target = 10000;
     let prefix = "";
     let unit = "USD";
@@ -217,7 +273,7 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
       target = num;
     }
 
-    return [{
+    results.push({
       type: "metric_kpi",
       title: "Revenue Target",
       config: {
@@ -227,42 +283,42 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
         unit: prefix === "$" ? "" : unit,
         step: 1
       }
-    }];
+    });
   }
 
-  // 4. PIPELINE / KANBAN FLOW
+  // F. Pipeline / Kanban Flow
   const isPipelineRequest = /(?:pipeline|kanban|funnel|workflow\s*stages)/i.test(promptLower);
-  if (isPipelineRequest && hasCreationKeyword) {
+  if (isPipelineRequest && hasCreationKeyword && !results.some(r => r.type === "pipeline_flow")) {
     let stages = ["Lead", "Qualified", "Demo", "Proposal", "Closed Won"];
     if (promptLower.includes("dev") || promptLower.includes("bug") || promptLower.includes("feature")) {
       stages = ["Backlog", "In Progress", "Code Review", "QA", "Deployed"];
     }
 
-    return [{
+    results.push({
       type: "pipeline_flow",
       title: "Execution Pipeline",
       config: {
         stages
       }
-    }];
+    });
   }
 
-  // 5. DATA TABLE / GRID
+  // G. Data Table / Grid
   const isTableRequest = /(?:table|data\s*grid|spreadsheet|sheet)/i.test(promptLower);
-  if (isTableRequest && hasCreationKeyword) {
-    return [{
+  if (isTableRequest && hasCreationKeyword && !results.some(r => r.type === "table")) {
+    results.push({
       type: "table",
       title: "Workspace Table",
       config: {
         columns: ["Item / Lead", "Owner", "Status", "Notes"]
       }
-    }];
+    });
   }
 
-  // 6. LINK HUB / BOOKMARKS DOCK
+  // H. Link Hub / Bookmarks Dock
   const isLinkRequest = /(?:links\s*dock|bookmarks|quick\s*launch|link\s*hub)/i.test(promptLower);
-  if (isLinkRequest && hasCreationKeyword) {
-    return [{
+  if (isLinkRequest && hasCreationKeyword && !results.some(r => r.type === "link_hub")) {
+    results.push({
       type: "link_hub",
       title: "Quick Launch Dock",
       items: [
@@ -270,10 +326,10 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
         { id: "2", title: "Figma", url: "https://figma.com" },
         { id: "3", title: "Docs", url: "https://docs.google.com" }
       ]
-    }];
+    });
   }
 
-  return null;
+  return results.length > 0 ? results : null;
 }
 
 // High-Precision Parser for OpenWork AI Copilot Responses
@@ -301,14 +357,24 @@ export function parseAICopilotResponse(rawReply: string, userPrompt = ""): Parse
     action = { type: "REMOVE_DATE", target: removeDateMatch[1].trim() };
   }
 
-  // 2. Block Payload Extraction (<<<BLOCKS: [...]>>>)
-  const blocksMatch = text.match(/<<<BLOCKS:([\s\S]*?)(?:>>>|>>|>|$)/i);
-  if (blocksMatch) {
-    const rawBlockPayload = blocksMatch[1].trim();
-    const parsed = sanitizeAndParseJSON<any>(rawBlockPayload);
-    if (parsed) {
-      const rawList = Array.isArray(parsed) ? parsed : [parsed];
-      suggestedBlocks = rawList
+  // 2. Block Payload Extraction (<<<BLOCKS: [...]>>> - handles single and multiple occurrences)
+  const blocksMatches = Array.from(text.matchAll(/<<<BLOCKS:([\s\S]*?)(?:>>>|>>|>|$)/gi));
+  if (blocksMatches.length > 0) {
+    const rawBlocksList: any[] = [];
+    for (const match of blocksMatches) {
+      const rawBlockPayload = match[1].trim();
+      const parsed = sanitizeAndParseJSON<any>(rawBlockPayload);
+      if (parsed) {
+        if (Array.isArray(parsed)) {
+          rawBlocksList.push(...parsed);
+        } else {
+          rawBlocksList.push(parsed);
+        }
+      }
+    }
+
+    if (rawBlocksList.length > 0) {
+      suggestedBlocks = rawBlocksList
         .map((item: any, idx: number) => {
           const type = normalizeBlockType(item.type || (item.config?.count !== undefined ? "counter_batch" : item.config?.timeRemaining !== undefined ? "timer_task" : item.config?.columns ? "table" : "checklist"));
           const title = item.title || `Task Block ${idx + 1}`;
