@@ -12,6 +12,7 @@ interface TestCase {
     expectedBlockCount?: number;
     hasAction?: boolean;
     actionType?: string;
+    expectedSchedule?: string;
     cleanContentShouldNotContain: string[];
     minCleanContentLength?: number;
   };
@@ -501,13 +502,38 @@ To start the timer, simply say "Start bug fixing timer". Once you've completed t
       actionType: "UPDATE_BLOCK",
       cleanContentShouldNotContain: ["<<<ACTION", "<<<BLOCKS"]
     }
+  },
+  {
+    name: "User Exact Prompt: 10 jobs on proptechbuzz everyday Monday to Friday (LLM Payload)",
+    userPrompt: "i need to post 10 jobs on proptechbuzz everyday from everyday Monday to Friday",
+    modelOutput: `Created your ProptechBuzz counter to post 10 jobs every day, Monday to Friday.
+<<<BLOCKS: [{"type": "counter_batch", "title": "ProptechBuzz Jobs", "config": {"target": 10, "unit": "jobs"}}]>>>`,
+    expected: {
+      hasBlocks: true,
+      blockType: "counter_batch",
+      expectedBlockCount: 1,
+      expectedSchedule: "weekdays",
+      cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
+    }
+  },
+  {
+    name: "User Exact Prompt: 10 jobs on proptechbuzz everyday Monday to Friday (Deterministic Fallback)",
+    userPrompt: "i need to post 10 jobs on proptechbuzz everyday from everyday Monday to Friday",
+    modelOutput: "Sure! I'll help you track posting 10 jobs every Monday to Friday on Proptechbuzz.",
+    expected: {
+      hasBlocks: true,
+      blockType: "counter_batch",
+      expectedBlockCount: 1,
+      expectedSchedule: "weekdays",
+      cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
+    }
   }
 ];
 
 // Run the comprehensive stress suite
 async function runSuite() {
   console.log("==========================================================");
-  console.log("🧪 OPENWORK AI PARSER & INTENT STRESS TEST SUITE (24 TESTS)");
+  console.log("🧪 OPENWORK AI PARSER & INTENT STRESS TEST SUITE");
   console.log("==========================================================\n");
 
   let passed = 0;
@@ -539,6 +565,12 @@ async function runSuite() {
     if (tc.expected.blockType && res.suggestedBlocks?.[0]?.type !== tc.expected.blockType) {
       testPassed = false;
       errors.push(`Expected block type "${tc.expected.blockType}" but got "${res.suggestedBlocks?.[0]?.type}".`);
+    }
+
+    // Check schedule
+    if (tc.expected.expectedSchedule && res.suggestedBlocks?.[0]?.config?.schedule !== tc.expected.expectedSchedule) {
+      testPassed = false;
+      errors.push(`Expected schedule "${tc.expected.expectedSchedule}" but got "${res.suggestedBlocks?.[0]?.config?.schedule}".`);
     }
 
     // Check action

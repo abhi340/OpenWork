@@ -395,20 +395,32 @@ Assistant: Why do programmers prefer dark mode? Because light attracts bugs! ðŸ˜
     }
 
     // Ensure recurring widgets retain their Mon-Fri / daily recurrence
-    const isRecurring = 
+    const isWeekdays =
       config.schedule === "weekdays" ||
       config.schedule === "mon-fri" ||
-      config.schedule === "daily" ||
-      config.schedule === "everyday" ||
       config.days === "mon-fri" ||
       config.days === "weekdays" ||
-      config.date === "all";
+      /(?:mon(?:day)?\s*to\s*fri(?:day)?|weekdays?|mon-fri)/i.test(b.title || "") ||
+      /(?:mon(?:day)?\s*to\s*fri(?:day)?|weekdays?|mon-fri)/i.test(JSON.stringify(config));
 
-    if (isRecurring) {
-      if (!config.schedule) config.schedule = "weekdays";
+    const isDaily =
+      config.schedule === "daily" ||
+      config.schedule === "everyday" ||
+      config.days === "all" ||
+      config.date === "all" ||
+      config.date === "daily" ||
+      /(?:daily|everyday)/i.test(b.title || "") ||
+      /(?:daily|everyday)/i.test(JSON.stringify(config));
+
+    if (isWeekdays) {
+      config.schedule = "weekdays";
+      config.date = "all";
+    } else if (isDaily) {
+      config.schedule = "daily";
       config.date = "all";
     } else if (!config.date && ["checklist", "counter_batch", "timer_task"].includes(b.type)) {
-      config.date = new Date().toISOString().split("T")[0];
+      const today = new Date();
+      config.date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     }
 
     return {

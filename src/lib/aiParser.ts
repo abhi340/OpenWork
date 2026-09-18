@@ -124,7 +124,7 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
 
   // Guard: Casual conversation / questions must NOT trigger deterministic block creation
   const isQuestionOrChat = /^(?:tell me|what is|how do|why |can you explain|explain|who is|joke|help\b|hi\b|hello\b|hey\b)/i.test(userPrompt.trim());
-  const hasCreationKeyword = /(?:add|create|build|make|set up|setup|start|track|insert|generate|new|unable to add|same for)\b/i.test(promptLower);
+  const hasCreationKeyword = /(?:add|create|build|make|set up|setup|start|track|insert|generate|new|unable to add|same for|need to|want to|have to|must|post|log|record)\b/i.test(promptLower);
 
   if (isQuestionOrChat && !hasCreationKeyword) {
     return null;
@@ -191,8 +191,10 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
   }
 
   // C. Single Counter / Batch Tracker (if not already satisfied by multi-entity or comparative)
-  const isCounterRequest = /(?:counter|tally|batch\s*tracker|call\s*tracker)/i.test(promptLower) ||
-    /\b\d+\s*(?:calls|leads|tickets|prs|tasks|reps|outreach|emails)\b/i.test(promptLower);
+  const isCounterRequest =
+    /(?:counter|tally|batch\s*tracker|call\s*tracker)/i.test(promptLower) ||
+    /\b\d+\s*(?:calls|leads|tickets|prs|tasks|reps|outreach|emails|jobs|posts|articles|videos|tweets|messages|items|applications)\b/i.test(promptLower) ||
+    /(?:post|log|track|record|do|publish)\s+\d+/i.test(promptLower);
 
   if (isCounterRequest && hasCreationKeyword && results.filter(r => r.type === "counter_batch").length === 0) {
     let target = 20;
@@ -208,9 +210,13 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
     let title = `${unit.charAt(0).toUpperCase() + unit.slice(1)} Tracker`;
     const forMatch = userPrompt.match(/(?:for|on|named|called)\s+([^,.\n]+)/i);
     if (forMatch) {
-      const candidate = forMatch[1].replace(/(?:counter|tracker|batch)/gi, "").trim();
+      const candidate = forMatch[1]
+        .replace(/(?:every\s*day|everyday|from\s+everyday|mon(?:day)?\s*to\s*fri(?:day)?|weekdays?|mon-fri|every\s*weekday).*/gi, "")
+        .replace(/(?:counter|tracker|batch)/gi, "")
+        .trim();
       if (candidate.length > 1) {
-        title = candidate.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+        const entity = candidate.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+        title = unit.toLowerCase() === "jobs" ? `${entity} Jobs` : entity.endsWith("Tracker") || entity.endsWith("Counter") ? entity : `${entity} Tracker`;
       }
     }
 
@@ -473,6 +479,30 @@ export function parseAICopilotResponse(rawReply: string, userPrompt = ""): Parse
           let config = { ...(item.config || {}) };
           let items = Array.isArray(item.items) ? item.items : [];
 
+          // Detect recurrence from prompt, model text, or item config
+          const isWeekdays =
+            /(?:mon(?:day)?\s*to\s*fri(?:day)?|weekdays?|mon-fri|every\s*weekday)/i.test(userPrompt) ||
+            /(?:mon(?:day)?\s*to\s*fri(?:day)?|weekdays?|mon-fri|every\s*weekday)/i.test(text) ||
+            config.schedule === "weekdays" ||
+            config.schedule === "mon-fri" ||
+            config.days === "mon-fri" ||
+            config.days === "weekdays";
+
+          const isDaily =
+            /(?:every\s*day|everyday|daily|all\s*days)/i.test(userPrompt) ||
+            /(?:every\s*day|everyday|daily|all\s*days)/i.test(text) ||
+            config.schedule === "daily" ||
+            config.schedule === "everyday" ||
+            config.days === "all";
+
+          if (isWeekdays) {
+            config.schedule = "weekdays";
+            config.date = "all";
+          } else if (isDaily) {
+            config.schedule = "daily";
+            config.date = "all";
+          }
+
           // Normalize items for checklists and filter out junk config lines
           if (type === "checklist" && items.length > 0) {
             items = items
@@ -489,12 +519,13 @@ export function parseAICopilotResponse(rawReply: string, userPrompt = ""): Parse
               .filter((it: any) => !isJunkConfigItem(it.text));
           }
 
-          // Normalize counter config
+          // Normalize counter config without wiping recurrence metadata
           if (type === "counter_batch") {
             config = {
+              ...config,
               target: typeof config.target === "number" ? config.target : 10,
               unit: config.unit || "tasks",
-              count: 0
+              count: typeof config.count === "number" ? config.count : 0
             };
           }
 
@@ -502,6 +533,7 @@ export function parseAICopilotResponse(rawReply: string, userPrompt = ""): Parse
           if (type === "timer_task") {
             const duration = (config.minutes ? config.minutes * 60 : config.initialDuration || config.timeRemaining || 25 * 60);
             config = {
+              ...config,
               initialDuration: duration,
               timeRemaining: duration,
               isRunning: false
@@ -511,8 +543,9 @@ export function parseAICopilotResponse(rawReply: string, userPrompt = ""): Parse
           // Normalize KPI config
           if (type === "metric_kpi") {
             config = {
+              ...config,
               target: typeof config.target === "number" ? config.target : 100,
-              current: 0,
+              current: typeof config.current === "number" ? config.current : 0,
               prefix: config.prefix || "",
               unit: config.unit || "",
               step: config.step || 1
@@ -522,6 +555,7 @@ export function parseAICopilotResponse(rawReply: string, userPrompt = ""): Parse
           // Normalize table config
           if (type === "table") {
             config = {
+              ...config,
               columns: Array.isArray(config.columns) && config.columns.length > 0 ? config.columns : ["Task / Lead", "Owner", "Status"]
             };
           }
@@ -529,6 +563,7 @@ export function parseAICopilotResponse(rawReply: string, userPrompt = ""): Parse
           // Normalize pipeline config
           if (type === "pipeline_flow") {
             config = {
+              ...config,
               stages: Array.isArray(config.stages) && config.stages.length > 0 ? config.stages : ["To Do", "In Progress", "Done"]
             };
           }
@@ -554,12 +589,32 @@ export function parseAICopilotResponse(rawReply: string, userPrompt = ""): Parse
         const rawList = Array.isArray(parsed) ? parsed : [parsed];
         const validBlocks = rawList.filter((b) => b && (b.type || b.title || b.items || b.config));
         if (validBlocks.length > 0) {
-          suggestedBlocks = validBlocks.map((b, i) => ({
-            type: normalizeBlockType(b.type || "checklist"),
-            title: b.title || `Block ${i + 1}`,
-            config: b.config || {},
-            items: Array.isArray(b.items) ? b.items.filter((it: any) => !isJunkConfigItem(typeof it === "string" ? it : it.text)) : []
-          }));
+          suggestedBlocks = validBlocks.map((b, i) => {
+            const config = { ...(b.config || {}) };
+            const isWeekdays =
+              /(?:mon(?:day)?\s*to\s*fri(?:day)?|weekdays?|mon-fri|every\s*weekday)/i.test(userPrompt) ||
+              config.schedule === "weekdays" ||
+              config.days === "mon-fri";
+            const isDaily =
+              /(?:every\s*day|everyday|daily|all\s*days)/i.test(userPrompt) ||
+              config.schedule === "daily" ||
+              config.days === "all";
+
+            if (isWeekdays) {
+              config.schedule = "weekdays";
+              config.date = "all";
+            } else if (isDaily) {
+              config.schedule = "daily";
+              config.date = "all";
+            }
+
+            return {
+              type: normalizeBlockType(b.type || "checklist"),
+              title: b.title || `Block ${i + 1}`,
+              config,
+              items: Array.isArray(b.items) ? b.items.filter((it: any) => !isJunkConfigItem(typeof it === "string" ? it : it.text)) : []
+            };
+          });
         }
       }
     }

@@ -39,24 +39,13 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null);
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
 
-  const currentDateStr = selectedDate.toISOString().split("T")[0];
+  const currentDateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
   const dayOfWeek = selectedDate.getDay(); // 0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday
   const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
 
   // Filter blocks for the active day (or recurring / persistent blocks)
   const displayBlocks = blocks.filter((b) => {
-    // 1. Daily / All days recurring
-    if (
-      b.config?.schedule === "daily" ||
-      b.config?.schedule === "everyday" ||
-      b.config?.days === "all" ||
-      b.config?.date === "all" ||
-      b.config?.date === "daily"
-    ) {
-      return true;
-    }
-
-    // 2. Weekdays / Mon-Fri recurring
+    // 1. Weekdays / Mon-Fri recurring (takes precedence for weekday filtering)
     if (
       b.config?.schedule === "weekdays" ||
       b.config?.schedule === "mon-fri" ||
@@ -66,6 +55,17 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
       b.config?.recurring === "mon-fri"
     ) {
       return isWeekday;
+    }
+
+    // 2. Daily / All days recurring
+    if (
+      b.config?.schedule === "daily" ||
+      b.config?.schedule === "everyday" ||
+      b.config?.days === "all" ||
+      b.config?.date === "all" ||
+      b.config?.date === "daily"
+    ) {
+      return true;
     }
 
     // 3. Explicit recurring days array (e.g. [1, 2, 3, 4, 5])
