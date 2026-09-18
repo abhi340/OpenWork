@@ -30,6 +30,7 @@ import { useWorkspaceStore, BlockType } from "@/store/workspaceStore";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { sendAIChatRequest } from "@/lib/ai";
 import { parseAICopilotResponse } from "@/lib/aiParser";
+import { getAIMemoryPromptSummary, recordWidgetCreation, recordWidgetUpdate } from "@/lib/aiMemory";
 import Link from "next/link";
 
 interface GeneratedBlock {
@@ -50,7 +51,7 @@ interface Message {
 
 export function FloatingAICopilot() {
   const { aiConfig } = useAuth();
-  const { blocks, addBlock, addBlocks, removeBlock, clearAllBlocks } = useWorkspaceStore();
+  const { blocks, addBlock, addBlocks, updateBlock, removeBlock, clearAllBlocks } = useWorkspaceStore();
   
   const [isOpen, setIsOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -210,22 +211,35 @@ export function FloatingAICopilot() {
         }).join("\n")
       : "Board is currently empty.";
 
+    const userMemorySummary = getAIMemoryPromptSummary();
+
     const systemPrompt = `You are OpenWork Copilot â€” an intelligent AI productivity assistant and workspace dashboard architect.
 
 Current Board State:
 ${boardContext}
 
+Learned User Memory & Habits:
+${userMemorySummary}
+
 COMMUNICATION RULES:
 1. GENERAL CONVERSATION & QUESTIONS: If the user asks a general question, joke, explanation, advice, or casual chat (e.g. "tell me a joke", "what is this", "how to prioritize"), answer naturally, helpfully, and concisely in markdown. DO NOT output any <<<BLOCKS>>> or <<<ACTION>>> tags for normal conversation.
 2. WIDGET & TASK CREATION: When the user asks to create, add, or set up widgets or workflows, ALWAYS output valid JSON inside <<<BLOCKS: [...]>>> tags.
-3. MULTIPLE WIDGETS & COMPARATIVE REQUESTS:
-   - When the user asks for multiple widgets (e.g. "add 2 counters: WildlifeBuzz and ProptechBuzz", "add timer and checklist"), include ALL requested widgets in the <<<BLOCKS: [...]>>> array.
-   - When the user asks "add the same for [Entity]", "another counter for [Entity]", or refers to an existing widget, inspect "Current Board State" above. Replicate the widget type and configuration (e.g. same target, unit, duration, stages) with the new entity's title!
-4. Keep conversational replies punchy, professional, and directly useful.
+3. RECURRING WIDGETS (MON TO FRI / DAILY):
+   - When the user asks for a widget to be displayed "every mon to fri", "weekdays", "daily", or "recurring", configure:
+     "config": { ...widgetConfig, "schedule": "weekdays", "date": "all" }
+   - For daily widgets across all days, set "schedule": "daily", "date": "all".
+4. MODIFYING / CUSTOMIZING EXISTING WIDGETS:
+   - When the user asks to modify, change, update, or rename an existing widget (e.g. "change target of ProptechBuzz to 25", "set WildlifeBuzz to repeat mon to fri", "rename X to Y"), use:
+     <<<ACTION: UPDATE_BLOCK, "widget title or id", {"title": "New Title", "config": {...updates}}>>>
+5. MULTIPLE WIDGETS & COMPARATIVE REQUESTS:
+   - When the user asks for multiple widgets (e.g. "add 2 counters: WildlifeBuzz and ProptechBuzz"), include ALL requested widgets in the <<<BLOCKS: [...]>>> array.
+   - When the user asks "add the same for [Entity]", inspect "Current Board State" above. Replicate the widget type and configuration with the new entity's title!
+6. Keep conversational replies punchy, professional, and directly useful.
 
 DASHBOARD WIDGET FORMATS (ALWAYS use <<<BLOCKS: [...]>>> with clean JSON):
 - Timer / Pomodoro: <<<BLOCKS: [{"type": "timer_task", "title": "Bug Fixing Timer", "config": {"initialDuration": 1500, "timeRemaining": 1500, "isRunning": false}}]>>>
 - Counter / Tracker: <<<BLOCKS: [{"type": "counter_batch", "title": "Cold Calls Tracker", "config": {"target": 50, "unit": "calls", "count": 0}}]>>>
+- Mon-Fri Recurring Counter: <<<BLOCKS: [{"type": "counter_batch", "title": "Daily Jobs Tracker", "config": {"target": 10, "unit": "Jobs", "count": 0, "schedule": "weekdays", "date": "all"}}]>>>
 - KPI Goal: <<<BLOCKS: [{"type": "metric_kpi", "title": "Monthly Revenue", "config": {"target": 10000, "current": 0, "prefix": "$", "unit": "USD"}}]>>>
 - Pipeline / Kanban: <<<BLOCKS: [{"type": "pipeline_flow", "title": "Sales Pipeline", "config": {"stages": ["Lead", "Qualified", "Demo", "Proposal", "Closed Won"]}}]>>>
 - Data Table: <<<BLOCKS: [{"type": "table", "title": "Lead Tracker", "config": {"columns": ["Name", "Company", "Stage", "Value"]}}]>>>
@@ -236,13 +250,17 @@ ACTIONS (Use ONLY when modifying board):
 - Clear entire board: <<<ACTION: CLEAR_BOARD>>>
 - Remove widget: <<<ACTION: REMOVE_BLOCK, "block id or title">>>
 - Remove date: <<<ACTION: REMOVE_DATE, "YYYY-MM-DD">>>
+- Modify existing widget: <<<ACTION: UPDATE_BLOCK, "block id or title", {"title": "...", "config": {...}}>>>
 
 FEW-SHOT EXAMPLES:
-User: "add a 25 min timer for bug fixing"
-Assistant: Created your 25-minute bug fixing timer. <<<BLOCKS: [{"type": "timer_task", "title": "Bug Fixing Timer", "config": {"initialDuration": 1500, "timeRemaining": 1500, "isRunning": false}}]>>>
+User: "create a counter for WildlifeBuzz that should be displayed every mon to fri"
+Assistant: Created your WildlifeBuzz counter scheduled for Monday to Friday. <<<BLOCKS: [{"type": "counter_batch", "title": "WildlifeBuzz Jobs", "config": {"target": 10, "unit": "Jobs", "count": 0, "schedule": "weekdays", "date": "all"}}]>>>
 
-User: "create a counter for 50 outreach calls"
-Assistant: Added your outreach calls counter. <<<BLOCKS: [{"type": "counter_batch", "title": "Outreach Calls Tracker", "config": {"target": 50, "unit": "calls", "count": 0}}]>>>
+User: "change target of ProptechBuzz to 25"
+Assistant: Updated ProptechBuzz target to 25. <<<ACTION: UPDATE_BLOCK, "ProptechBuzz", {"config": {"target": 25}}>>>
+
+User: "set WildlifeBuzz to repeat every mon to fri"
+Assistant: Updated WildlifeBuzz schedule to Monday to Friday. <<<ACTION: UPDATE_BLOCK, "WildlifeBuzz", {"config": {"schedule": "weekdays", "date": "all"}}>>>
 
 User: "add 2 counters: WildlifeBuzz Jobs and ProptechBuzz Jobs with target 10"
 Assistant: Created both counters for you. <<<BLOCKS: [{"type": "counter_batch", "title": "WildlifeBuzz Jobs", "config": {"target": 10, "unit": "Jobs", "count": 0}}, {"type": "counter_batch", "title": "ProptechBuzz Jobs", "config": {"target": 10, "unit": "Jobs", "count": 0}}]>>>
@@ -293,6 +311,18 @@ Assistant: Why do programmers prefer dark mode? Because light attracts bugs! ðŸ˜
           const matching = blocks.filter((b) => b.config?.date === targetDate);
           for (const b of matching) {
             await removeBlock(b.id);
+          }
+        } else if (parsed.action?.type === "UPDATE_BLOCK" && parsed.action.target && parsed.action.updates) {
+          const target = parsed.action.target.toLowerCase();
+          const found = blocks.find((b) => b.id.toLowerCase() === target || b.title.toLowerCase().includes(target) || b.type.toLowerCase().includes(target));
+          if (found) {
+            const mergedConfig = { ...(found.config || {}), ...(parsed.action.updates.config || {}) };
+            const finalUpdates = {
+              ...parsed.action.updates,
+              config: mergedConfig
+            };
+            await updateBlock(found.id, finalUpdates);
+            recordWidgetUpdate(found.title, finalUpdates);
           }
         }
 
@@ -364,8 +394,20 @@ Assistant: Why do programmers prefer dark mode? Because light attracts bugs! ðŸ˜
       ];
     }
 
-    // Ensure daily scoped widgets receive active date stamping if not specified
-    if (!config.date && ["checklist", "counter_batch", "timer_task"].includes(b.type)) {
+    // Ensure recurring widgets retain their Mon-Fri / daily recurrence
+    const isRecurring = 
+      config.schedule === "weekdays" ||
+      config.schedule === "mon-fri" ||
+      config.schedule === "daily" ||
+      config.schedule === "everyday" ||
+      config.days === "mon-fri" ||
+      config.days === "weekdays" ||
+      config.date === "all";
+
+    if (isRecurring) {
+      if (!config.schedule) config.schedule = "weekdays";
+      config.date = "all";
+    } else if (!config.date && ["checklist", "counter_batch", "timer_task"].includes(b.type)) {
       config.date = new Date().toISOString().split("T")[0];
     }
 
@@ -378,7 +420,11 @@ Assistant: Why do programmers prefer dark mode? Because light attracts bugs! ðŸ˜
   };
 
   const handleApplyAllBlocks = async (blocksToApply: GeneratedBlock[], msgId: string) => {
-    const cleanedList = blocksToApply.map((b) => sanitizeBlockForCreation(b));
+    const cleanedList = blocksToApply.map((b) => {
+      const sanitized = sanitizeBlockForCreation(b);
+      recordWidgetCreation(sanitized);
+      return sanitized;
+    });
     await addBlocks(cleanedList);
     setAppliedProposalId(msgId);
     setTimeout(() => setAppliedProposalId(null), 3000);
@@ -386,6 +432,7 @@ Assistant: Why do programmers prefer dark mode? Because light attracts bugs! ðŸ˜
 
   const handleAddSingleBlock = (block: GeneratedBlock) => {
     const clean = sanitizeBlockForCreation(block);
+    recordWidgetCreation(clean);
     addBlock({
       ...clean,
       order_index: blocks.length

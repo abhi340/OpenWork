@@ -14,8 +14,9 @@ export interface ParsedAIResponse {
   cleanContent: string;
   suggestedBlocks?: ParsedBlock[];
   action?: {
-    type: "CLEAR_BOARD" | "REMOVE_BLOCK" | "REMOVE_DATE";
+    type: "CLEAR_BOARD" | "REMOVE_BLOCK" | "REMOVE_DATE" | "UPDATE_BLOCK";
     target?: string;
+    updates?: Record<string, any>;
   };
   suggestedTasks?: string[];
 }
@@ -131,6 +132,19 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
 
   const results: ParsedBlock[] = [];
 
+  // Recurrence schedule detection (e.g. "every mon to fri", "weekdays", "daily")
+  const isWeekdaysRequest = /(?:mon(?:day)?\s*to\s*fri(?:day)?|weekdays?|mon-fri|every\s*weekday)/i.test(promptLower);
+  const isDailyRequest = /(?:every\s*day|everyday|daily|all\s*days)/i.test(promptLower);
+
+  const recurrenceConfig: Record<string, any> = {};
+  if (isWeekdaysRequest) {
+    recurrenceConfig.schedule = "weekdays";
+    recurrenceConfig.date = "all";
+  } else if (isDailyRequest) {
+    recurrenceConfig.schedule = "daily";
+    recurrenceConfig.date = "all";
+  }
+
   // A. Comparative or "Same for X" Widget Request (e.g. "unable to add the same for ProptechBuzz", "same for WildlifeBuzz")
   const sameMatch = userPrompt.match(/(?:the\s+)?same\s+for\s+([^,.\n?]+)/i);
   if (sameMatch) {
@@ -143,7 +157,8 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
         config: {
           target: 10,
           unit: "tasks",
-          count: 0
+          count: 0,
+          ...recurrenceConfig
         }
       });
     }
@@ -167,7 +182,8 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
           config: {
             target: 10,
             unit: "tasks",
-            count: 0
+            count: 0,
+            ...recurrenceConfig
           }
         });
       }
@@ -204,7 +220,8 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
       config: {
         target,
         unit,
-        count: 0
+        count: 0,
+        ...recurrenceConfig
       }
     });
   }
@@ -247,12 +264,27 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
       config: {
         initialDuration: durationSeconds,
         timeRemaining: durationSeconds,
-        isRunning: false
+        isRunning: false,
+        ...recurrenceConfig
       }
     });
   }
 
-  // E. Metric KPI Goal
+  // E. Generic Weekday / Daily Schedule Widget Request
+  if (results.length === 0 && (isWeekdaysRequest || isDailyRequest) && hasCreationKeyword) {
+    results.push({
+      type: "counter_batch",
+      title: isWeekdaysRequest ? "Weekday Sprint Batch" : "Daily Goal Batch",
+      config: {
+        target: 10,
+        unit: "tasks",
+        count: 0,
+        ...recurrenceConfig
+      }
+    });
+  }
+
+  // F. Metric KPI Goal
   const isKpiRequest = /(?:kpi|metric|revenue|mrr|arr|\$\s*\d+|\d+\s*k\s*(?:revenue|mrr|goal))/i.test(promptLower);
   if (isKpiRequest && hasCreationKeyword && !results.some(r => r.type === "metric_kpi")) {
     let target = 10000;
@@ -281,12 +313,13 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
         current: 0,
         prefix,
         unit: prefix === "$" ? "" : unit,
-        step: 1
+        step: 1,
+        ...recurrenceConfig
       }
     });
   }
 
-  // F. Pipeline / Kanban Flow
+  // G. Pipeline / Kanban Flow
   const isPipelineRequest = /(?:pipeline|kanban|funnel|workflow\s*stages)/i.test(promptLower);
   if (isPipelineRequest && hasCreationKeyword && !results.some(r => r.type === "pipeline_flow")) {
     let stages = ["Lead", "Qualified", "Demo", "Proposal", "Closed Won"];
@@ -298,24 +331,26 @@ export function extractDeterministicBlocks(userPrompt: string, modelOutput = "")
       type: "pipeline_flow",
       title: "Execution Pipeline",
       config: {
-        stages
+        stages,
+        ...recurrenceConfig
       }
     });
   }
 
-  // G. Data Table / Grid
+  // H. Data Table / Grid
   const isTableRequest = /(?:table|data\s*grid|spreadsheet|sheet)/i.test(promptLower);
   if (isTableRequest && hasCreationKeyword && !results.some(r => r.type === "table")) {
     results.push({
       type: "table",
       title: "Workspace Table",
       config: {
-        columns: ["Item / Lead", "Owner", "Status", "Notes"]
+        columns: ["Item / Lead", "Owner", "Status", "Notes"],
+        ...recurrenceConfig
       }
     });
   }
 
-  // H. Link Hub / Bookmarks Dock
+  // I. Link Hub / Bookmarks Dock
   const isLinkRequest = /(?:links\s*dock|bookmarks|quick\s*launch|link\s*hub)/i.test(promptLower);
   if (isLinkRequest && hasCreationKeyword && !results.some(r => r.type === "link_hub")) {
     results.push({
@@ -355,6 +390,63 @@ export function parseAICopilotResponse(rawReply: string, userPrompt = ""): Parse
   const removeDateMatch = text.match(/<<<ACTION:\s*REMOVE_DATE\s*,\s*["']?([^"'>]+)["']?\s*(?:>+)/i);
   if (removeDateMatch) {
     action = { type: "REMOVE_DATE", target: removeDateMatch[1].trim() };
+  }
+
+  const updateBlockMatch = text.match(/<<<ACTION:\s*UPDATE_BLOCK\s*,\s*["']?([^,"'>]+)["']?\s*,\s*({[\s\S]*?})\s*(?:>+)/i);
+  if (updateBlockMatch) {
+    const target = updateBlockMatch[1].trim();
+    const updates = sanitizeAndParseJSON<Record<string, any>>(updateBlockMatch[2]);
+    if (updates) {
+      action = { type: "UPDATE_BLOCK", target, updates };
+    }
+  }
+
+  // Fallback: Deterministic modification action detection if no action tag was generated
+  if (!action) {
+    const promptLower = userPrompt.toLowerCase();
+    const isUpdatePrompt = /(?:change|update|set|rename|modify|switch)\b/i.test(promptLower);
+    if (isUpdatePrompt) {
+      // 1. Change target
+      const targetChangeMatch = userPrompt.match(/(?:change|update|set)\s+(?:the\s+)?(?:target\s+(?:of|for)\s+|count\s+(?:of|for)\s+)?([^,.\n]+?)\s+(?:target\s+)?to\s+(\d+)/i);
+      if (targetChangeMatch) {
+        const rawTarget = targetChangeMatch[1].replace(/(?:target of|target for|count of|count for)/gi, "").trim();
+        const newTargetNum = parseInt(targetChangeMatch[2], 10);
+        if (rawTarget.length > 1) {
+          action = {
+            type: "UPDATE_BLOCK",
+            target: rawTarget,
+            updates: { config: { target: newTargetNum } }
+          };
+        }
+      }
+
+      // 2. Set to Mon to Fri / Weekdays
+      const scheduleChangeMatch = userPrompt.match(/(?:set|make|change|update)\s+([^,.\n]+?)\s+(?:to\s+)?(?:repeat\s+|display\s+|run\s+)?(?:every\s+)?(?:mon(?:day)?\s*to\s*fri(?:day)?|weekdays?|mon-fri)/i);
+      if (scheduleChangeMatch) {
+        const rawTarget = scheduleChangeMatch[1].trim();
+        if (rawTarget.length > 1) {
+          action = {
+            type: "UPDATE_BLOCK",
+            target: rawTarget,
+            updates: { config: { schedule: "weekdays", date: "all" } }
+          };
+        }
+      }
+
+      // 3. Rename
+      const renameMatch = userPrompt.match(/rename\s+([^,.\n]+?)\s+to\s+([^,.\n]+)/i);
+      if (renameMatch) {
+        const oldTarget = renameMatch[1].trim();
+        const newTitle = renameMatch[2].trim();
+        if (oldTarget.length > 1 && newTitle.length > 1) {
+          action = {
+            type: "UPDATE_BLOCK",
+            target: oldTarget,
+            updates: { title: newTitle }
+          };
+        }
+      }
+    }
   }
 
   // 2. Block Payload Extraction (<<<BLOCKS: [...]>>> - handles single and multiple occurrences)

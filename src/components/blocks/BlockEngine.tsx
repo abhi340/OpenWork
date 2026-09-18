@@ -40,12 +40,44 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
   const [isCustomModalOpen, setIsCustomModalOpen] = useState(false);
 
   const currentDateStr = selectedDate.toISOString().split("T")[0];
+  const dayOfWeek = selectedDate.getDay(); // 0 = Sunday, 1 = Monday, ..., 5 = Friday, 6 = Saturday
+  const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
 
-  // Filter blocks for the active day (or global/persistent blocks)
+  // Filter blocks for the active day (or recurring / persistent blocks)
   const displayBlocks = blocks.filter((b) => {
-    if (b.config?.date && b.config.date !== "all") {
+    // 1. Daily / All days recurring
+    if (
+      b.config?.schedule === "daily" ||
+      b.config?.schedule === "everyday" ||
+      b.config?.days === "all" ||
+      b.config?.date === "all" ||
+      b.config?.date === "daily"
+    ) {
+      return true;
+    }
+
+    // 2. Weekdays / Mon-Fri recurring
+    if (
+      b.config?.schedule === "weekdays" ||
+      b.config?.schedule === "mon-fri" ||
+      b.config?.days === "mon-fri" ||
+      b.config?.days === "weekdays" ||
+      b.config?.recurring === "weekdays" ||
+      b.config?.recurring === "mon-fri"
+    ) {
+      return isWeekday;
+    }
+
+    // 3. Explicit recurring days array (e.g. [1, 2, 3, 4, 5])
+    if (Array.isArray(b.config?.recurringDays)) {
+      return b.config.recurringDays.includes(dayOfWeek);
+    }
+
+    // 4. Default: Specific date match
+    if (b.config?.date) {
       return b.config.date === currentDateStr;
     }
+
     return true;
   });
 
@@ -258,6 +290,19 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
                   {block.config?.tag && (
                     <span className="text-[10px] px-2 py-0.2 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 font-semibold">
                       {block.config.tag}
+                    </span>
+                  )}
+
+                  {(block.config?.schedule === "weekdays" || block.config?.schedule === "mon-fri" || block.config?.days === "mon-fri" || block.config?.days === "weekdays" || block.config?.recurring === "weekdays") && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/70 text-blue-600 dark:text-blue-300 font-medium flex items-center gap-1 border border-blue-200/70 dark:border-blue-800/60" title="Recurring Monday to Friday">
+                      <Calendar size={10} />
+                      Mon-Fri
+                    </span>
+                  )}
+
+                  {(block.config?.schedule === "daily" || block.config?.schedule === "everyday" || block.config?.date === "all" || block.config?.days === "all") && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-300 font-medium flex items-center gap-1 border border-emerald-200/70 dark:border-emerald-800/60" title="Displayed Every Day">
+                      Daily
                     </span>
                   )}
                 </div>

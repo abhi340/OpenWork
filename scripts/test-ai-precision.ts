@@ -456,6 +456,51 @@ To start the timer, simply say "Start bug fixing timer". Once you've completed t
       expectedBlockCount: 1,
       cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
     }
+  },
+  {
+    name: "Weekday Mon-Fri Recurring Widget Creation Request",
+    userPrompt: "create a widget for WildlifeBuzz that should be displayed every mon to fri",
+    modelOutput: `Created your WildlifeBuzz counter for Monday to Friday.
+<<<BLOCKS: [{"type": "counter_batch", "title": "WildlifeBuzz Jobs", "config": {"target": 10, "unit": "Jobs", "schedule": "weekdays", "date": "all"}}]>>>`,
+    expected: {
+      hasBlocks: true,
+      blockType: "counter_batch",
+      expectedBlockCount: 1,
+      cleanContentShouldNotContain: ["<<<BLOCKS", "<<<ACTION"]
+    }
+  },
+  {
+    name: "Widget Target Modification Action (UPDATE_BLOCK)",
+    userPrompt: "change target of ProptechBuzz to 25",
+    modelOutput: `Updated ProptechBuzz target to 25. <<<ACTION: UPDATE_BLOCK, "ProptechBuzz", {"config": {"target": 25}}>>>`,
+    expected: {
+      hasBlocks: false,
+      hasAction: true,
+      actionType: "UPDATE_BLOCK",
+      cleanContentShouldNotContain: ["<<<ACTION", "<<<BLOCKS"]
+    }
+  },
+  {
+    name: "Widget Renaming Action (UPDATE_BLOCK)",
+    userPrompt: "rename WildlifeBuzz Jobs to WildlifeBuzz Outreach",
+    modelOutput: `Renamed block to WildlifeBuzz Outreach. <<<ACTION: UPDATE_BLOCK, "WildlifeBuzz Jobs", {"title": "WildlifeBuzz Outreach"}>>>`,
+    expected: {
+      hasBlocks: false,
+      hasAction: true,
+      actionType: "UPDATE_BLOCK",
+      cleanContentShouldNotContain: ["<<<ACTION", "<<<BLOCKS"]
+    }
+  },
+  {
+    name: "Deterministic Fallback for Updating Widget Schedule to Mon to Fri",
+    userPrompt: "set WildlifeBuzz to repeat every mon to fri",
+    modelOutput: "WildlifeBuzz has been configured to repeat Monday to Friday.",
+    expected: {
+      hasBlocks: false,
+      hasAction: true,
+      actionType: "UPDATE_BLOCK",
+      cleanContentShouldNotContain: ["<<<ACTION", "<<<BLOCKS"]
+    }
   }
 ];
 
