@@ -14,10 +14,12 @@ interface ChecklistItem {
 
 export function ChecklistBlock({ 
   block,
-  onUpdate
+  onUpdate,
+  currentDate
 }: { 
   block: WorkBlock;
   onUpdate?: (id: string, updates: Partial<WorkBlock>) => void;
+  currentDate?: string;
 }) {
   const { updateBlock: storeUpdateBlock } = useWorkspaceStore();
   const updateBlock = onUpdate || storeUpdateBlock;
@@ -28,18 +30,69 @@ export function ChecklistBlock({
   const [bulkText, setBulkText] = useState("");
   const [isBlocker, setIsBlocker] = useState(false);
 
-  const items: ChecklistItem[] = block.items || [
+  const getTodayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const todayStr = getTodayStr();
+  const activeDate = currentDate || todayStr;
+
+  const isRecurring =
+    block.config?.schedule === "weekdays" ||
+    block.config?.schedule === "mon-fri" ||
+    block.config?.schedule === "daily" ||
+    block.config?.schedule === "everyday" ||
+    block.config?.date === "all" ||
+    block.config?.date === "daily";
+
+  const dailyCompleted: Record<string, string[]> = block.config?.dailyCompletedItemIds || {};
+  const rawItems: ChecklistItem[] = block.items || [
     { id: "1", text: "Sample actionable task item", completed: false }
   ];
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  // Resolve item completion status for activeDate
+  const items: ChecklistItem[] = rawItems.map((item) => {
+    if (!isRecurring) {
+      return item;
+    }
+    if (dailyCompleted[activeDate] !== undefined) {
+      return { ...item, completed: dailyCompleted[activeDate].includes(item.id) };
+    }
+    if (block.config?.lastActiveDate === activeDate || block.config?.createdDate === activeDate) {
+      return item;
+    }
+    // New day! Reset to unchecked
+    return { ...item, completed: false };
+  });
 
   const toggleItem = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const updated = items.map((item) =>
-      item.id === id ? { ...item, completed: !item.completed } : item
-    );
-    updateBlock(block.id, { items: updated });
+    if (isRecurring) {
+      const currentCompletedIds = dailyCompleted[activeDate] !== undefined
+        ? dailyCompleted[activeDate]
+        : (block.config?.lastActiveDate === activeDate || block.config?.createdDate === activeDate)
+          ? rawItems.filter((i) => i.completed).map((i) => i.id)
+          : [];
+
+      const isAlreadyDone = currentCompletedIds.includes(id);
+      const updatedIds = isAlreadyDone
+        ? currentCompletedIds.filter((itemId) => itemId !== id)
+        : [...currentCompletedIds, id];
+
+      const updatedDailyCompleted = { ...dailyCompleted, [activeDate]: updatedIds };
+      updateBlock(block.id, {
+        config: {
+          ...block.config,
+          lastActiveDate: activeDate,
+          dailyCompletedItemIds: updatedDailyCompleted
+        }
+      });
+    } else {
+      const updated = items.map((item) =>
+        item.id === id ? { ...item, completed: !item.completed } : item
+      );
+      updateBlock(block.id, { items: updated });
+    }
   };
 
   const addItem = (e: React.FormEvent) => {
@@ -54,7 +107,7 @@ export function ChecklistBlock({
       dueDate: newItemDate || undefined
     };
 
-    updateBlock(block.id, { items: [...items, newItem] });
+    updateBlock(block.id, { items: [...rawItems, newItem] });
     setNewItemText("");
     setNewItemDate("");
     setShowDatePicker(false);
@@ -77,15 +130,24 @@ export function ChecklistBlock({
       isBlocker: text.toLowerCase().includes("#blocker")
     }));
 
-    updateBlock(block.id, { items: [...items, ...newItems] });
+    updateBlock(block.id, { items: [...rawItems, ...newItems] });
     setBulkText("");
     setShowBulkPaste(false);
   };
 
   const removeItem = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const updated = items.filter((item) => item.id !== id);
-    updateBlock(block.id, { items: updated });
+    const updated = rawItems.filter((item) => item.id !== id);
+    if (isRecurring && dailyCompleted[activeDate]) {
+      const updatedIds = dailyCompleted[activeDate].filter((itemId) => itemId !== id);
+      const updatedDailyCompleted = { ...dailyCompleted, [activeDate]: updatedIds };
+      updateBlock(block.id, { 
+        items: updated,
+        config: { ...block.config, dailyCompletedItemIds: updatedDailyCompleted }
+      });
+    } else {
+      updateBlock(block.id, { items: updated });
+    }
   };
 
   const completedCount = items.filter((i) => i.completed).length;

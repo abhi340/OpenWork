@@ -27,7 +27,11 @@ export function Sidebar() {
   const { user, isAuthenticated, logout } = useAuth();
   const { blocks, fetchBlocks } = useWorkspaceStore();
 
-  const progress = calculateBoardProgress(blocks);
+  const todayDateStr = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  const progress = calculateBoardProgress(blocks, todayDateStr);
 
   const todayStr = new Date().toLocaleDateString("en-US", {
     weekday: "short",

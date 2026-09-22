@@ -188,7 +188,8 @@ export function ZenFocusMode({ isOpen, onClose }: ZenFocusModeProps) {
       {/* Bottom Mini Objectives */}
       <div className="max-w-2xl mx-auto w-full">
         {blocks.length > 0 && (() => {
-          const progress = calculateBoardProgress(blocks);
+          const todayDateStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`;
+          const progress = calculateBoardProgress(blocks, todayDateStr);
           return (
             <div className="bg-zinc-900/80 border border-zinc-800/80 rounded-2xl p-4 backdrop-blur-md">
               <div className="flex items-center justify-between text-xs font-semibold text-zinc-400 mb-2">

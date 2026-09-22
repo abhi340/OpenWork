@@ -1,17 +1,19 @@
 "use client";
 
 import React, { useState } from "react";
-import { Plus, Minus, Check, Target, Trash2, AlertCircle } from "lucide-react";
+import { Plus, Minus, Check, Target, Trash2, AlertCircle, RotateCcw } from "lucide-react";
 import { useWorkspaceStore, WorkBlock } from "@/store/workspaceStore";
 
 import { playGoalChime } from "@/lib/sound";
 
 export function CounterBlock({ 
   block,
-  onUpdate
+  onUpdate,
+  currentDate
 }: { 
   block: WorkBlock;
   onUpdate?: (id: string, updates: Partial<WorkBlock>) => void;
+  currentDate?: string;
 }) {
   const { updateBlock: storeUpdateBlock } = useWorkspaceStore();
   const updateBlock = onUpdate || storeUpdateBlock;
@@ -19,9 +21,51 @@ export function CounterBlock({
   const [isEditingTarget, setIsEditingTarget] = useState(false);
   const [isBlocker, setIsBlocker] = useState(false);
 
-  const count = block.config?.count || 0;
+  const getTodayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const activeDate = currentDate || getTodayStr();
+
   const target = block.config?.target || 5;
-  const subitems: string[] = block.items || [];
+  const dailyCounts: Record<string, number> = block.config?.dailyCounts || {};
+  const dailySubitems: Record<string, string[]> = block.config?.dailySubitems || {};
+
+  // Resolve daily count:
+  // 1. If explicit count exists for activeDate, use it
+  // 2. If the block was created or last active on activeDate, use block.config.count
+  // 3. If it's a legacy single-date block matching activeDate, use block.config.count
+  // 4. Otherwise (new day/different day), count resets to 0!
+  let count = 0;
+  if (dailyCounts[activeDate] !== undefined) {
+    count = dailyCounts[activeDate];
+  } else if (block.config?.lastActiveDate === activeDate || block.config?.createdDate === activeDate) {
+    count = block.config?.count || 0;
+  } else if (!block.config?.lastActiveDate && !block.config?.createdDate && Object.keys(dailyCounts).length === 0) {
+    if (block.config?.date && block.config.date !== "all" && block.config.date !== "daily" && block.config.date === activeDate) {
+      count = block.config?.count || 0;
+    } else {
+      count = 0;
+    }
+  } else {
+    count = 0;
+  }
+
+  // Resolve daily subitems (logged items/blockers):
+  let subitems: string[] = [];
+  if (dailySubitems[activeDate] !== undefined) {
+    subitems = dailySubitems[activeDate];
+  } else if (block.config?.lastActiveDate === activeDate || block.config?.createdDate === activeDate) {
+    subitems = block.items || [];
+  } else if (!block.config?.lastActiveDate && !block.config?.createdDate && Object.keys(dailySubitems).length === 0) {
+    if (block.config?.date && block.config.date !== "all" && block.config.date !== "daily" && block.config.date === activeDate) {
+      subitems = block.items || [];
+    } else {
+      subitems = [];
+    }
+  } else {
+    subitems = [];
+  }
 
   const updateCount = (newCount: number, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -29,9 +73,25 @@ export function CounterBlock({
     if (clamped >= target && count < target) {
       playGoalChime();
     }
+    const updatedDailyCounts = { ...dailyCounts, [activeDate]: clamped };
+    if (block.config?.lastActiveDate && block.config.lastActiveDate !== activeDate && !updatedDailyCounts[block.config.lastActiveDate]) {
+      updatedDailyCounts[block.config.lastActiveDate] = block.config.count || 0;
+    }
+
     updateBlock(block.id, { 
-      config: { ...block.config, count: clamped, target } 
+      config: { 
+        ...block.config, 
+        count: clamped, 
+        target,
+        lastActiveDate: activeDate,
+        dailyCounts: updatedDailyCounts
+      } 
     });
+  };
+
+  const handleResetToday = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    updateCount(0, e);
   };
 
   const setTargetValue = (newTarget: number) => {
@@ -50,10 +110,24 @@ export function CounterBlock({
       itemText = `[#BLOCKER] ${itemText}`;
     }
 
-    const updated = [...subitems, itemText];
+    const nextCount = count + 1;
+    const updatedSubitems = [...subitems, itemText];
+    const updatedDailyCounts = { ...dailyCounts, [activeDate]: nextCount };
+    const updatedDailySubitems = { ...dailySubitems, [activeDate]: updatedSubitems };
+    if (block.config?.lastActiveDate && block.config.lastActiveDate !== activeDate && !updatedDailyCounts[block.config.lastActiveDate]) {
+      updatedDailyCounts[block.config.lastActiveDate] = block.config.count || 0;
+    }
+
     updateBlock(block.id, { 
-      items: updated,
-      config: { ...block.config, count: count + 1, target }
+      items: updatedSubitems,
+      config: { 
+        ...block.config, 
+        count: nextCount, 
+        target,
+        lastActiveDate: activeDate,
+        dailyCounts: updatedDailyCounts,
+        dailySubitems: updatedDailySubitems
+      }
     });
     setNewSubtask("");
     setIsBlocker(false);
@@ -61,8 +135,15 @@ export function CounterBlock({
 
   const removeSubitem = (index: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    const updated = subitems.filter((_, idx) => idx !== index);
-    updateBlock(block.id, { items: updated });
+    const updatedSubitems = subitems.filter((_, idx) => idx !== index);
+    const updatedDailySubitems = { ...dailySubitems, [activeDate]: updatedSubitems };
+    updateBlock(block.id, { 
+      items: updatedSubitems,
+      config: {
+        ...block.config,
+        dailySubitems: updatedDailySubitems
+      }
+    });
   };
 
   const progressPercent = Math.min(100, Math.round((count / target) * 100));
@@ -111,6 +192,15 @@ export function CounterBlock({
 
         {/* Stepper Controls */}
         <div className="flex items-center gap-1.5">
+          {count > 0 && (
+            <button
+              onClick={handleResetToday}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+              title="Reset today's count to 0"
+            >
+              <RotateCcw size={14} />
+            </button>
+          )}
           <button
             onClick={(e) => updateCount(count - 1, e)}
             disabled={count === 0}

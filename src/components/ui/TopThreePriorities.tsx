@@ -10,7 +10,7 @@ interface PriorityItem {
 }
 
 export function TopThreePriorities({ selectedDate = new Date() }: { selectedDate?: Date }) {
-  const dateKey = selectedDate.toISOString().split("T")[0];
+  const dateKey = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
 
   const defaultItems: PriorityItem[] = [
     { id: "1", text: "Close key customer / executive partnership", completed: false },

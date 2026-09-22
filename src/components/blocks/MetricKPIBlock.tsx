@@ -8,15 +8,48 @@ import { playGoalChime } from "@/lib/sound";
 
 export function MetricKPIBlock({ 
   block,
-  onUpdate
+  onUpdate,
+  currentDate
 }: { 
   block: WorkBlock;
   onUpdate?: (id: string, updates: Partial<WorkBlock>) => void;
+  currentDate?: string;
 }) {
   const { updateBlock: storeUpdateBlock } = useWorkspaceStore();
   const updateBlock = onUpdate || storeUpdateBlock;
 
-  const currentVal = block.config?.current ?? 0;
+  const getTodayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const activeDate = currentDate || getTodayStr();
+
+  const isRecurring = 
+    block.config?.schedule === "weekdays" ||
+    block.config?.schedule === "mon-fri" ||
+    block.config?.schedule === "daily" ||
+    block.config?.schedule === "everyday" ||
+    block.config?.date === "all" ||
+    block.config?.date === "daily";
+
+  const dailyValues: Record<string, number> = block.config?.dailyValues || {};
+  let currentVal = 0;
+  if (!isRecurring) {
+    currentVal = block.config?.current ?? 0;
+  } else if (dailyValues[activeDate] !== undefined) {
+    currentVal = dailyValues[activeDate];
+  } else if (block.config?.lastActiveDate === activeDate || block.config?.createdDate === activeDate) {
+    currentVal = block.config?.current ?? 0;
+  } else if (!block.config?.lastActiveDate && !block.config?.createdDate && Object.keys(dailyValues).length === 0) {
+    if (block.config?.date && block.config.date !== "all" && block.config.date !== "daily" && block.config.date === activeDate) {
+      currentVal = block.config?.current ?? 0;
+    } else {
+      currentVal = 0;
+    }
+  } else {
+    currentVal = 0;
+  }
+
   const targetVal = block.config?.target ?? 100;
   const unit = block.config?.unit || "";
   const prefix = block.config?.prefix || ""; // e.g. "$"
@@ -33,8 +66,14 @@ export function MetricKPIBlock({
     if (next >= targetVal && currentVal < targetVal) {
       playGoalChime();
     }
+    const updatedDailyValues = { ...dailyValues, [activeDate]: next };
     updateBlock(block.id, {
-      config: { ...block.config, current: next }
+      config: { 
+        ...block.config, 
+        current: next,
+        lastActiveDate: activeDate,
+        dailyValues: updatedDailyValues
+      }
     });
   };
 
@@ -44,8 +83,14 @@ export function MetricKPIBlock({
       if (parsed >= targetVal && currentVal < targetVal) {
         playGoalChime();
       }
+      const updatedDailyValues = { ...dailyValues, [activeDate]: parsed };
       updateBlock(block.id, {
-        config: { ...block.config, current: parsed }
+        config: { 
+          ...block.config, 
+          current: parsed,
+          lastActiveDate: activeDate,
+          dailyValues: updatedDailyValues
+        }
       });
     }
     setIsEditing(false);

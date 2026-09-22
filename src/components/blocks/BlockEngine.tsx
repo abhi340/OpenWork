@@ -112,6 +112,8 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
       type,
       order_index: blocks.length,
       config: {
+        createdDate: currentDateStr,
+        lastActiveDate: currentDateStr,
         ...(isDailyScoped ? { date: currentDateStr } : {}),
         ...(type === "timer_task" 
           ? { timeRemaining: 25 * 60, initialDuration: 25 * 60, isRunning: false } 
@@ -347,12 +349,12 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
 
               {/* Body */}
               <div>
-                {block.type === "counter_batch" && <CounterBlock block={block} />}
-                {block.type === "timer_task" && <TimerBlock block={block} />}
+                {block.type === "counter_batch" && <CounterBlock block={block} currentDate={currentDateStr} />}
+                {block.type === "timer_task" && <TimerBlock block={block} currentDate={currentDateStr} />}
                 {block.type === "table" && <TableBlock block={block} />}
-                {block.type === "checklist" && <ChecklistBlock block={block} />}
+                {block.type === "checklist" && <ChecklistBlock block={block} currentDate={currentDateStr} />}
                 {block.type === "pipeline_flow" && <PipelineFlowBlock block={block} />}
-                {block.type === "metric_kpi" && <MetricKPIBlock block={block} />}
+                {block.type === "metric_kpi" && <MetricKPIBlock block={block} currentDate={currentDateStr} />}
                 {block.type === "link_hub" && <LinkHubBlock block={block} />}
                 {block.type === "date_milestones" && <DateMilestonesBlock block={block} />}
                 {block.type === "rich_doc" && (

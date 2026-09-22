@@ -412,6 +412,11 @@ Assistant: Why do programmers prefer dark mode? Because light attracts bugs! ðŸ˜
       /(?:daily|everyday)/i.test(b.title || "") ||
       /(?:daily|everyday)/i.test(JSON.stringify(config));
 
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    config.createdDate = config.createdDate || todayStr;
+    config.lastActiveDate = config.lastActiveDate || todayStr;
+
     if (isWeekdays) {
       config.schedule = "weekdays";
       config.date = "all";
@@ -419,8 +424,7 @@ Assistant: Why do programmers prefer dark mode? Because light attracts bugs! ðŸ˜
       config.schedule = "daily";
       config.date = "all";
     } else if (!config.date && ["checklist", "counter_batch", "timer_task"].includes(b.type)) {
-      const today = new Date();
-      config.date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      config.date = todayStr;
     }
 
     return {

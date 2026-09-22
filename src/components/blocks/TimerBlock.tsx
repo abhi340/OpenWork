@@ -7,28 +7,41 @@ import { playGoalChime } from "@/lib/sound";
 
 export function TimerBlock({ 
   block,
-  onUpdate
+  onUpdate,
+  currentDate
 }: { 
   block: WorkBlock;
   onUpdate?: (id: string, updates: Partial<WorkBlock>) => void;
+  currentDate?: string;
 }) {
   const { updateBlock: storeUpdateBlock } = useWorkspaceStore();
   const updateBlock = onUpdate || storeUpdateBlock;
-  
+
+  const getTodayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const activeDate = currentDate || getTodayStr();
+
   const initialDuration = block.config?.initialDuration ?? 25 * 60;
-  const isRunning = block.config?.isRunning || false;
+  // If the timer was last active on a different day, it should reset to full duration and be paused
+  const isPreviousDay = block.config?.lastActiveDate && block.config.lastActiveDate !== activeDate;
+  const isRunning = isPreviousDay ? false : (block.config?.isRunning || false);
+  const currentRemaining = isPreviousDay ? initialDuration : (block.config?.timeRemaining ?? initialDuration);
   
   // Local state for smooth 1-second ticks without flooding the database
-  const [secondsLeft, setSecondsLeft] = useState<number>(block.config?.timeRemaining ?? initialDuration);
+  const [secondsLeft, setSecondsLeft] = useState<number>(currentRemaining);
   const secondsRef = useRef(secondsLeft);
   secondsRef.current = secondsLeft;
 
-  // Sync with remote block changes if changed outside
+  // Sync with remote block changes or date change
   useEffect(() => {
-    if (block.config?.timeRemaining !== undefined && !isRunning) {
+    if (isPreviousDay) {
+      setSecondsLeft(initialDuration);
+    } else if (block.config?.timeRemaining !== undefined && !isRunning) {
       setSecondsLeft(block.config.timeRemaining);
     }
-  }, [block.config?.timeRemaining, isRunning]);
+  }, [block.config?.timeRemaining, isRunning, isPreviousDay, initialDuration]);
 
   // Interval timer tick
   useEffect(() => {
@@ -41,7 +54,7 @@ export function TimerBlock({
             clearInterval(interval!);
             playGoalChime();
             updateBlock(block.id, {
-              config: { ...block.config, timeRemaining: 0, isRunning: false }
+              config: { ...block.config, timeRemaining: 0, isRunning: false, lastActiveDate: activeDate }
             });
             return 0;
           }
@@ -53,7 +66,7 @@ export function TimerBlock({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isRunning, block.id, block.config, updateBlock]);
+  }, [isRunning, block.id, block.config, updateBlock, activeDate]);
 
   // Save current progress on unmount or pause
   const toggleTimer = (e: React.MouseEvent) => {
@@ -63,7 +76,8 @@ export function TimerBlock({
       config: { 
         ...block.config, 
         timeRemaining: secondsRef.current,
-        isRunning: nextRunning 
+        isRunning: nextRunning,
+        lastActiveDate: activeDate
       } 
     });
   };
@@ -75,7 +89,8 @@ export function TimerBlock({
       config: { 
         ...block.config, 
         timeRemaining: initialDuration, 
-        isRunning: false 
+        isRunning: false,
+        lastActiveDate: activeDate
       } 
     });
   };

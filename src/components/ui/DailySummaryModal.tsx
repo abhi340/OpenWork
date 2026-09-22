@@ -51,6 +51,11 @@ export function DailySummaryModal({ isOpen, onClose }: DailySummaryModalProps) {
     day: "numeric"
   });
 
+  const todayDateStr = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+
   const batchBlocks = blocks.filter((b) => b.type === "counter_batch");
   const timerBlocks = blocks.filter((b) => b.type === "timer_task");
   const checklistBlocks = blocks.filter((b) => b.type === "checklist");
@@ -59,10 +64,27 @@ export function DailySummaryModal({ isOpen, onClose }: DailySummaryModalProps) {
   const tableBlocks = blocks.filter((b) => b.type === "table");
   const dateBlocks = blocks.filter((b) => b.type === "date_milestones");
 
-  // Computed summary metrics
+  // Computed summary metrics scoped to today
   const totalChecklistItems = checklistBlocks.reduce((acc, b) => acc + (b.items?.length || 0), 0);
-  const completedChecklistItems = checklistBlocks.reduce((acc, b) => acc + (b.items?.filter((i: any) => i.completed)?.length || 0), 0);
-  const totalCountersCompleted = batchBlocks.reduce((acc, b) => acc + (b.config?.count || 0), 0);
+  const completedChecklistItems = checklistBlocks.reduce((acc, b) => {
+    if (b.config?.dailyCompletedItemIds?.[todayDateStr] !== undefined) {
+      return acc + (b.config.dailyCompletedItemIds[todayDateStr]?.length || 0);
+    }
+    if (b.config?.lastActiveDate === todayDateStr || b.config?.createdDate === todayDateStr) {
+      return acc + (b.items?.filter((i: any) => i.completed)?.length || 0);
+    }
+    return acc;
+  }, 0);
+
+  const totalCountersCompleted = batchBlocks.reduce((acc, b) => {
+    if (b.config?.dailyCounts?.[todayDateStr] !== undefined) {
+      return acc + (b.config.dailyCounts[todayDateStr] || 0);
+    }
+    if (b.config?.lastActiveDate === todayDateStr || b.config?.createdDate === todayDateStr) {
+      return acc + (b.config?.count || 0);
+    }
+    return acc;
+  }, 0);
   const totalTargetCounters = batchBlocks.reduce((acc, b) => acc + (b.config?.target || 0), 0);
 
   // Generate channel-specific texts
@@ -73,7 +95,12 @@ export function DailySummaryModal({ isOpen, onClose }: DailySummaryModalProps) {
     if (metricBlocks.length > 0) {
       text += `📊 *Key Performance Indicators*\n`;
       metricBlocks.forEach((b) => {
-        const cur = b.config?.current || 0;
+        let cur = 0;
+        if (b.config?.dailyValues?.[todayDateStr] !== undefined) {
+          cur = b.config.dailyValues[todayDateStr];
+        } else if (b.config?.lastActiveDate === todayDateStr || b.config?.createdDate === todayDateStr) {
+          cur = b.config?.current || 0;
+        }
         const tgt = b.config?.target || 100;
         const pfx = b.config?.prefix || "";
         const unt = b.config?.unit || "";
@@ -87,10 +114,15 @@ export function DailySummaryModal({ isOpen, onClose }: DailySummaryModalProps) {
     if (batchBlocks.length > 0) {
       text += `🎯 *Target Batches & Sprints*\n`;
       batchBlocks.forEach((b) => {
-        const c = b.config?.count || 0;
+        let c = 0;
+        if (b.config?.dailyCounts?.[todayDateStr] !== undefined) {
+          c = b.config.dailyCounts[todayDateStr];
+        } else if (b.config?.lastActiveDate === todayDateStr || b.config?.createdDate === todayDateStr) {
+          c = b.config?.count || 0;
+        }
         const t = b.config?.target || 5;
         const u = b.config?.unit || "tasks";
-        text += `• *${b.title}*: \`${c}/${t} ${u}\` (${Math.round((c / t) * 100)}%)\n`;
+        text += `• *${b.title}*: \`${c}/${t} ${u}\` (${Math.round((c / (t || 1)) * 100)}%)\n`;
       });
       text += `\n`;
     }
