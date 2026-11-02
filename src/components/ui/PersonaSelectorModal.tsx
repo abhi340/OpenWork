@@ -13,8 +13,9 @@ import {
   Sparkles,
   ArrowRight,
   CheckCircle2,
-  Clock,
-  Table as TableIcon,
+  CheckSquare,
+  GitCommit,
+  Globe,
   FileText
 } from "lucide-react";
 import { useWorkspaceStore } from "@/store/workspaceStore";
@@ -24,7 +25,7 @@ interface PersonaSelectorModalProps {
   onClose: () => void;
 }
 
-interface PersonaBlueprint {
+export interface PersonaBlueprint {
   id: string;
   roleTitle: string;
   level: "Executive" | "Technical" | "Growth" | "Product" | "Creative" | "Operations" | "Entry";
@@ -33,7 +34,7 @@ interface PersonaBlueprint {
   accentColor: string;
   blocks: {
     title: string;
-    type: "counter_batch" | "timer_task" | "table" | "rich_doc";
+    type: "counter_batch" | "checklist" | "pipeline_flow" | "link_hub" | "rich_doc";
     config: any;
     items?: any[];
   }[];
@@ -51,21 +52,25 @@ const PERSONA_BLUEPRINTS: PersonaBlueprint[] = [
       {
         title: "Key Decisions & Approvals",
         type: "counter_batch",
-        config: { count: 0, target: 5 },
+        config: { count: 0, target: 5, unit: "Decisions" },
         items: ["Hire: Head of Sales offer letter", "Approve: Q3 Infrastructure Budget"]
       },
       {
-        title: "Strategic Blitz Sprint (15 min)",
-        type: "timer_task",
-        config: { timeRemaining: 15 * 60, initialDuration: 15 * 60, isRunning: false }
+        title: "Executive Action Checklist",
+        type: "checklist",
+        config: {},
+        items: [
+          { id: "1", text: "Sign Sequoia term sheet", completed: false },
+          { id: "2", text: "Review weekly ARR growth report", completed: false }
+        ]
       },
       {
-        title: "Company KPI & Investor Pipeline",
-        type: "table",
-        config: { columns: ["Metric / Stakeholder", "Target", "Current", "Status"] },
+        title: "Strategic Deal Stages",
+        type: "pipeline_flow",
+        config: { stages: ["Intro", "Partner Meeting", "Term Sheet", "Closed"] },
         items: [
-          { "Metric / Stakeholder": "Monthly Recurring Revenue", Target: "$100k", Current: "$84k", Status: "On Track" },
-          { "Metric / Stakeholder": "Sequoia Partner Meeting", Target: "Series A", Current: "Pitch Ready", Status: "Scheduled" }
+          { id: "1", title: "Series A Financing", stage: "Partner Meeting" },
+          { id: "2", title: "Enterprise Pilot Partner", stage: "Term Sheet" }
         ]
       }
     ]
@@ -74,28 +79,32 @@ const PERSONA_BLUEPRINTS: PersonaBlueprint[] = [
     id: "software_engineer",
     roleTitle: "Software Engineer / Tech Lead",
     level: "Technical",
-    description: "PR reviews, uninterrupted deep-code focus blocks, bug incident tables, and architecture notes.",
+    description: "PR reviews, feature branch stages, bug fixes, and technical documentation notes.",
     icon: Code2,
     accentColor: "from-blue-500 to-indigo-600",
     blocks: [
       {
         title: "Pull Requests & Code Reviews",
         type: "counter_batch",
-        config: { count: 0, target: 6 },
+        config: { count: 0, target: 6, unit: "PRs" },
         items: ["PR #242 - Auth middleware fix", "PR #245 - SQLite migration"]
       },
       {
-        title: "Deep Coding Sprint (50 min)",
-        type: "timer_task",
-        config: { timeRemaining: 50 * 60, initialDuration: 50 * 60, isRunning: false }
+        title: "Sprint Feature Stages",
+        type: "pipeline_flow",
+        config: { stages: ["Backlog", "In Dev", "Code Review", "QA", "Shipped"] },
+        items: [
+          { id: "1", title: "ENG-104: Websocket Sync", stage: "In Dev" },
+          { id: "2", title: "ENG-112: Dark Mode CSS", stage: "Code Review" }
+        ]
       },
       {
-        title: "Active Bug & Task Triage",
-        type: "table",
-        config: { columns: ["Ticket ID", "Component", "Severity", "PR Link"] },
+        title: "Daily Engineering Priorities",
+        type: "checklist",
+        config: {},
         items: [
-          { "Ticket ID": "ENG-104", Component: "Websocket Sync", Severity: "High", "PR Link": "pr/104-sync" },
-          { "Ticket ID": "ENG-112", Component: "Dark Mode CSS", Severity: "Low", "PR Link": "pr/112-theme" }
+          { id: "1", text: "Verify database migration on local branch", completed: false },
+          { id: "2", text: "Deploy staging build & run automated tests", completed: false }
         ]
       }
     ]
@@ -104,29 +113,33 @@ const PERSONA_BLUEPRINTS: PersonaBlueprint[] = [
     id: "sales_rep",
     roleTitle: "Sales Rep / Account Exec (AE / SDR)",
     level: "Growth",
-    description: "High-volume outreach batches, fast +5 stepper, lead stage tracking, and call scripts.",
+    description: "High-volume outreach batches, fast +5 stepper, lead stage tracking, and CRM launchpad.",
     icon: TrendingUp,
     accentColor: "from-emerald-500 to-teal-600",
     blocks: [
       {
         title: "Cold Calls & LinkedIn DMs",
         type: "counter_batch",
-        config: { count: 0, target: 20 },
+        config: { count: 0, target: 20, unit: "Calls" },
         items: ["Acme Corp - VP Engineering", "Stripe - Ops Manager"]
       },
       {
-        title: "Live Lead Pipeline",
-        type: "table",
-        config: { columns: ["Company", "Contact", "Deal Size", "Stage", "Next Step"] },
+        title: "Deal Pipeline Stages",
+        type: "pipeline_flow",
+        config: { stages: ["Lead", "Qualified", "Demo", "Contract", "Closed Won"] },
         items: [
-          { Company: "TechFlow Inc", Contact: "David K.", "Deal Size": "$24k/yr", Stage: "Demo Scheduled", "Next Step": "Send deck" },
-          { Company: "Apex Media", Contact: "Rachel S.", "Deal Size": "$12k/yr", Stage: "Contract Sent", "Next Step": "Legal review" }
+          { id: "1", title: "TechFlow Inc ($24k)", stage: "Demo" },
+          { id: "2", title: "Apex Media ($12k)", stage: "Contract" }
         ]
       },
       {
-        title: "Demo Prep & Follow-up (15 min)",
-        type: "timer_task",
-        config: { timeRemaining: 15 * 60, initialDuration: 15 * 60, isRunning: false }
+        title: "Sales Launchpad & Tools",
+        type: "link_hub",
+        config: {},
+        items: [
+          { id: "1", title: "Salesforce CRM", url: "https://salesforce.com" },
+          { id: "2", title: "LinkedIn Sales Navigator", url: "https://linkedin.com" }
+        ]
       }
     ]
   },
@@ -134,29 +147,29 @@ const PERSONA_BLUEPRINTS: PersonaBlueprint[] = [
     id: "product_manager",
     roleTitle: "Product Manager & Designer",
     level: "Product",
-    description: "User interview tracking, feature impact matrices, sprint planning, and PRD scratchpads.",
+    description: "User interview tracking, feature roadmap stages, sprint planning, and PRD scratchpads.",
     icon: Layout,
     accentColor: "from-purple-500 to-pink-600",
     blocks: [
       {
         title: "User Feedback Sessions",
         type: "counter_batch",
-        config: { count: 0, target: 3 },
+        config: { count: 0, target: 3, unit: "Interviews" },
         items: ["Customer #41 onboarding interview", "Beta tester friction points review"]
       },
       {
-        title: "Feature Roadmap & Backlog Matrix",
-        type: "table",
-        config: { columns: ["Feature", "Impact", "Effort", "Sprint Target"] },
+        title: "Roadmap Release Stages",
+        type: "pipeline_flow",
+        config: { stages: ["Discovery", "Spec Drafting", "In Dev", "Ready for QA", "Shipped"] },
         items: [
-          { Feature: "1-Click CSV Export", Impact: "High", Effort: "Low", "Sprint Target": "v1.2" },
-          { Feature: "Offline PWA Sync", Impact: "Critical", Effort: "Medium", "Sprint Target": "v1.3" }
+          { id: "1", title: "1-Click CSV Export", stage: "Ready for QA" },
+          { id: "2", title: "Offline PWA Sync", stage: "In Dev" }
         ]
       },
       {
-        title: "Spec Writing Session (45 min)",
-        type: "timer_task",
-        config: { timeRemaining: 45 * 60, initialDuration: 45 * 60, isRunning: false }
+        title: "Product Specs & PRD Scratchpad",
+        type: "rich_doc",
+        config: {}
       }
     ]
   },
@@ -164,27 +177,31 @@ const PERSONA_BLUEPRINTS: PersonaBlueprint[] = [
     id: "content_creator",
     roleTitle: "Content Writer & Growth Marketer",
     level: "Creative",
-    description: "Publishing sprints, social media threads, SEO content calendars, and drafting notes.",
+    description: "Publishing sprints, social media threads, editorial stage pipeline, and drafting checklist.",
     icon: PenTool,
     accentColor: "from-rose-500 to-orange-500",
     blocks: [
       {
         title: "Daily Content Posts & Tweets",
         type: "counter_batch",
-        config: { count: 0, target: 4 },
+        config: { count: 0, target: 4, unit: "Posts" },
         items: ["LinkedIn Product Launch Post", "Twitter technical teardown thread"]
       },
       {
-        title: "Focus Writing Sprint (35 min)",
-        type: "timer_task",
-        config: { timeRemaining: 35 * 60, initialDuration: 35 * 60, isRunning: false }
+        title: "Editorial Pipeline Stages",
+        type: "pipeline_flow",
+        config: { stages: ["Ideation", "Drafting", "Review", "Scheduled", "Published"] },
+        items: [
+          { id: "1", title: "Why Notion Is Too Slow For Execution", stage: "Drafting" }
+        ]
       },
       {
-        title: "Editorial & Campaign Calendar",
-        type: "table",
-        config: { columns: ["Content Title", "Channel", "Keyword / Hook", "Status"] },
+        title: "Publishing & SEO Checklist",
+        type: "checklist",
+        config: {},
         items: [
-          { "Content Title": "Why Notion Is Too Slow For Execution", Channel: "Blog", "Keyword / Hook": "Productivity", Status: "Drafting" }
+          { id: "1", text: "Create high-res header image and thumbnail", completed: false },
+          { id: "2", text: "Check OpenGraph tags and Twitter card preview", completed: false }
         ]
       }
     ]
@@ -193,27 +210,32 @@ const PERSONA_BLUEPRINTS: PersonaBlueprint[] = [
     id: "intern_newhire",
     roleTitle: "Intern & Junior Associate",
     level: "Entry",
-    description: "Daily task checkoffs, learning sprint sessions, onboarding checklists, and mentor log.",
+    description: "Daily task checkoffs, onboarding checklist, team workflow stages, and quick launch resources.",
     icon: GraduationCap,
     accentColor: "from-cyan-500 to-blue-500",
     blocks: [
       {
         title: "Assigned Daily Tickets",
         type: "counter_batch",
-        config: { count: 0, target: 4 },
+        config: { count: 0, target: 4, unit: "Tickets" },
         items: ["Setup local Cloudflare D1 dev environment", "Complete onboarding documentation"]
       },
       {
-        title: "Learning & Code Study (30 min)",
-        type: "timer_task",
-        config: { timeRemaining: 30 * 60, initialDuration: 30 * 60, isRunning: false }
+        title: "Onboarding Task Checklist",
+        type: "checklist",
+        config: {},
+        items: [
+          { id: "1", text: "Clone repository and run npm install", completed: true },
+          { id: "2", text: "Schedule 1:1 onboarding sync with team mentor", completed: false }
+        ]
       },
       {
-        title: "Mentor 1:1 Questions & Log",
-        type: "table",
-        config: { columns: ["Topic / Question", "Mentor", "Answer / Notes", "Resolved"] },
+        title: "Quick Launch Knowledge Base",
+        type: "link_hub",
+        config: {},
         items: [
-          { "Topic / Question": "Database schema migration flow", Mentor: "Abhi", "Answer / Notes": "Run pb_setup.mjs", Resolved: "Yes" }
+          { id: "1", title: "Team Notion Docs", url: "https://notion.so" },
+          { id: "2", title: "GitHub Organization", url: "https://github.com" }
         ]
       }
     ]
@@ -330,18 +352,21 @@ export function PersonaSelectorModal({ isOpen, onClose }: PersonaSelectorModalPr
                     className="p-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 flex items-center justify-between text-xs"
                   >
                     <div className="flex items-center gap-2.5">
+                      {b.type === "checklist" && <CheckSquare size={15} className="text-cyan-500" />}
+                      {b.type === "pipeline_flow" && <GitCommit size={15} className="text-orange-500" />}
                       {b.type === "counter_batch" && <CheckCircle2 size={15} className="text-purple-500" />}
-                      {b.type === "timer_task" && <Clock size={15} className="text-blue-500" />}
-                      {b.type === "table" && <TableIcon size={15} className="text-emerald-500" />}
+                      {b.type === "link_hub" && <Globe size={15} className="text-indigo-500" />}
                       {b.type === "rich_doc" && <FileText size={15} className="text-amber-500" />}
 
                       <span className="font-semibold text-slate-800 dark:text-zinc-200">{b.title}</span>
                     </div>
 
                     <span className="text-[11px] text-slate-400 dark:text-zinc-500 font-mono">
-                      {b.type === "counter_batch" && `Target: ${b.config.target} units`}
-                      {b.type === "timer_task" && `Duration: ${Math.floor(b.config.initialDuration / 60)} mins`}
-                      {b.type === "table" && `${b.config.columns.length} columns`}
+                      {b.type === "counter_batch" && `Target: ${b.config.target} ${b.config.unit || 'units'}`}
+                      {b.type === "pipeline_flow" && `${b.config.stages?.length || 4} stages`}
+                      {b.type === "checklist" && `${b.items?.length || 0} tasks`}
+                      {b.type === "link_hub" && `${b.items?.length || 0} bookmarks`}
+                      {b.type === "rich_doc" && `Scratchpad notes`}
                     </span>
                   </div>
                 ))}

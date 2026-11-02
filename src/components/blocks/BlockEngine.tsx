@@ -88,45 +88,29 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
   }, []);
 
   const handleAdd = (type: BlockType) => {
-    const isDailyScoped = ["checklist", "counter_batch", "timer_task"].includes(type);
+    const isDailyScoped = ["checklist", "counter_batch"].includes(type);
 
     addBlock({
       title: 
-        type === "counter_batch" 
-          ? "Daily Target Batch" 
-          : type === "timer_task" 
-          ? "Focus Sprint" 
-          : type === "table" 
-          ? "Lead Pipeline" 
-          : type === "checklist"
+        type === "checklist"
           ? "Daily Priority Checklist"
           : type === "pipeline_flow"
           ? "Execution Stages"
-          : type === "metric_kpi"
-          ? "Key Performance Metric"
+          : type === "counter_batch" 
+          ? "Daily Target Batch" 
           : type === "link_hub"
           ? "Daily Launchpad Links"
-          : type === "date_milestones"
-          ? "Scheduled Milestones & Deadlines"
-          : "Work Scratchpad",
+          : "Work Notes & Scratchpad",
       type,
       order_index: blocks.length,
       config: {
         createdDate: currentDateStr,
         lastActiveDate: currentDateStr,
         ...(isDailyScoped ? { date: currentDateStr } : {}),
-        ...(type === "timer_task" 
-          ? { timeRemaining: 25 * 60, initialDuration: 25 * 60, isRunning: false } 
-          : type === "counter_batch" 
+        ...(type === "counter_batch" 
           ? { count: 0, target: 5, unit: "Tasks" } 
-          : type === "table"
-          ? { columns: ["Task / Lead", "Owner", "Status"] }
           : type === "pipeline_flow"
           ? { stages: ["Backlog", "In Progress", "Review", "Done"] }
-          : type === "metric_kpi"
-          ? { current: 0, target: 100, unit: "pts", prefix: "", step: 1 }
-          : type === "link_hub"
-          ? {}
           : {})
       },
       items: 
@@ -138,11 +122,6 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
           ? [
               { id: "1", title: "GitHub Repo", url: "https://github.com" },
               { id: "2", title: "Documentation", url: "https://google.com" }
-            ]
-          : type === "date_milestones"
-          ? [
-              { id: "1", title: "Submit Board Deck Review", dueDate: currentDateStr, completed: false, priority: "high" },
-              { id: "2", title: "Contract Milestone Sign-off", dueDate: new Date(Date.now() + 86400000 * 2).toISOString().split("T")[0], completed: false, priority: "medium" }
             ]
           : []
     });
@@ -181,37 +160,25 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
       {/* Clean Utility Add Bar */}
       <div className="p-2.5 bg-slate-100/80 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800/80 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <button onClick={() => handleAdd("counter_batch")} className={actionBtnClass}>
-            <CheckCircle2 size={13} className="text-purple-600 dark:text-purple-400" />
-            <span>+ Counter</span>
-          </button>
-          <button onClick={() => handleAdd("timer_task")} className={actionBtnClass}>
-            <Clock size={13} className="text-blue-600 dark:text-blue-400" />
-            <span>+ Timer</span>
-          </button>
-          <button onClick={() => handleAdd("table")} className={actionBtnClass}>
-            <TableIcon size={13} className="text-emerald-600 dark:text-emerald-400" />
-            <span>+ Grid Table</span>
-          </button>
           <button onClick={() => handleAdd("checklist")} className={actionBtnClass}>
             <CheckSquare size={13} className="text-cyan-600 dark:text-cyan-400" />
             <span>+ Checklist</span>
           </button>
           <button onClick={() => handleAdd("pipeline_flow")} className={actionBtnClass}>
             <GitCommit size={13} className="text-orange-600 dark:text-orange-400" />
-            <span>+ Pipeline</span>
+            <span>+ Pipeline Kanban</span>
           </button>
-          <button onClick={() => handleAdd("metric_kpi")} className={actionBtnClass}>
-            <TrendingUp size={13} className="text-rose-600 dark:text-rose-400" />
-            <span>+ KPI Goal</span>
+          <button onClick={() => handleAdd("counter_batch")} className={actionBtnClass}>
+            <CheckCircle2 size={13} className="text-purple-600 dark:text-purple-400" />
+            <span>+ Counter</span>
           </button>
           <button onClick={() => handleAdd("link_hub")} className={actionBtnClass}>
             <Globe size={13} className="text-indigo-600 dark:text-indigo-400" />
-            <span>+ Links</span>
+            <span>+ Launch Links</span>
           </button>
-          <button onClick={() => handleAdd("date_milestones")} className={actionBtnClass}>
-            <Calendar size={13} className="text-amber-600 dark:text-amber-400" />
-            <span>+ Scheduled</span>
+          <button onClick={() => handleAdd("rich_doc")} className={actionBtnClass}>
+            <FileText size={13} className="text-amber-600 dark:text-amber-400" />
+            <span>+ Notes Doc</span>
           </button>
         </div>
 
@@ -402,11 +369,19 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
               <div className="flex items-center justify-center gap-2 flex-wrap text-xs">
                 <button
                   type="button"
-                  onClick={() => handleAdd("timer_task")}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 hover:border-blue-500 flex items-center gap-1.5 transition-all shadow-2xs"
+                  onClick={() => handleAdd("checklist")}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 hover:border-cyan-500 flex items-center gap-1.5 transition-all shadow-2xs"
                 >
-                  <Clock size={12} className="text-blue-500" />
-                  <span>Focus Sprint</span>
+                  <CheckSquare size={12} className="text-cyan-500" />
+                  <span>Checklist</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAdd("pipeline_flow")}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 hover:border-orange-500 flex items-center gap-1.5 transition-all shadow-2xs"
+                >
+                  <GitCommit size={12} className="text-orange-500" />
+                  <span>Pipeline Kanban</span>
                 </button>
                 <button
                   type="button"
@@ -418,35 +393,19 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleAdd("checklist")}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 hover:border-cyan-500 flex items-center gap-1.5 transition-all shadow-2xs"
+                  onClick={() => handleAdd("link_hub")}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 hover:border-indigo-500 flex items-center gap-1.5 transition-all shadow-2xs"
                 >
-                  <CheckSquare size={12} className="text-cyan-500" />
-                  <span>Checklist</span>
+                  <Globe size={12} className="text-indigo-500" />
+                  <span>Launch Links</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleAdd("metric_kpi")}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 hover:border-rose-500 flex items-center gap-1.5 transition-all shadow-2xs"
-                >
-                  <TrendingUp size={12} className="text-rose-500" />
-                  <span>KPI Goal</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleAdd("table")}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 hover:border-emerald-500 flex items-center gap-1.5 transition-all shadow-2xs"
-                >
-                  <TableIcon size={12} className="text-emerald-500" />
-                  <span>Data Grid</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleAdd("date_milestones")}
+                  onClick={() => handleAdd("rich_doc")}
                   className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-slate-700 dark:text-zinc-300 hover:border-amber-500 flex items-center gap-1.5 transition-all shadow-2xs"
                 >
-                  <Calendar size={12} className="text-amber-500" />
-                  <span>Scheduled Deadlines</span>
+                  <FileText size={12} className="text-amber-500" />
+                  <span>Notes Doc</span>
                 </button>
               </div>
             </div>

@@ -23,7 +23,8 @@ import {
   Wand2,
   Check,
   TrendingUp,
-  Globe
+  Globe,
+  FileText
 } from "lucide-react";
 import { useAuth, AIConfig } from "@/context/AuthContext";
 import { useWorkspaceStore, BlockType } from "@/store/workspaceStore";
@@ -236,15 +237,13 @@ COMMUNICATION RULES:
    - When the user asks "add the same for [Entity]", inspect "Current Board State" above. Replicate the widget type and configuration with the new entity's title!
 6. Keep conversational replies punchy, professional, and directly useful.
 
-DASHBOARD WIDGET FORMATS (ALWAYS use <<<BLOCKS: [...]>>> with clean JSON):
-- Timer / Pomodoro: <<<BLOCKS: [{"type": "timer_task", "title": "Bug Fixing Timer", "config": {"initialDuration": 1500, "timeRemaining": 1500, "isRunning": false}}]>>>
-- Counter / Tracker: <<<BLOCKS: [{"type": "counter_batch", "title": "Cold Calls Tracker", "config": {"target": 50, "unit": "calls", "count": 0}}]>>>
+DASHBOARD WIDGET FORMATS (ALWAYS use <<<BLOCKS: [...]>>> with clean JSON - ONLY use these 5 supported types):
+- Checklist (Checkbox Box): <<<BLOCKS: [{"type": "checklist", "title": "Daily Sprint", "items": [{"id": "1", "text": "Task name", "completed": false}]}]>>>
+- Pipeline / Kanban (Stage Flow Box): <<<BLOCKS: [{"type": "pipeline_flow", "title": "Sales Pipeline", "config": {"stages": ["Lead", "Qualified", "Demo", "Proposal", "Closed Won"]}}]>>>
+- Counter / Batch Target (Counter Box): <<<BLOCKS: [{"type": "counter_batch", "title": "Cold Calls Tracker", "config": {"target": 50, "unit": "calls", "count": 0}}]>>>
 - Mon-Fri Recurring Counter: <<<BLOCKS: [{"type": "counter_batch", "title": "Daily Jobs Tracker", "config": {"target": 10, "unit": "Jobs", "count": 0, "schedule": "weekdays", "date": "all"}}]>>>
-- KPI Goal: <<<BLOCKS: [{"type": "metric_kpi", "title": "Monthly Revenue", "config": {"target": 10000, "current": 0, "prefix": "$", "unit": "USD"}}]>>>
-- Pipeline / Kanban: <<<BLOCKS: [{"type": "pipeline_flow", "title": "Sales Pipeline", "config": {"stages": ["Lead", "Qualified", "Demo", "Proposal", "Closed Won"]}}]>>>
-- Data Table: <<<BLOCKS: [{"type": "table", "title": "Lead Tracker", "config": {"columns": ["Name", "Company", "Stage", "Value"]}}]>>>
-- Checklist: <<<BLOCKS: [{"type": "checklist", "title": "Daily Sprint", "items": [{"id": "1", "text": "Task name", "completed": false}]}]>>>
-- Links Dock: <<<BLOCKS: [{"type": "link_hub", "title": "Launchpad", "items": [{"id": "1", "title": "GitHub", "url": "https://github.com"}]}]>>>
+- Launch Links Dock (Link Hub Box): <<<BLOCKS: [{"type": "link_hub", "title": "Launchpad", "items": [{"id": "1", "title": "GitHub", "url": "https://github.com"}]}]>>>
+- Rich Notes Doc (Notes Box): <<<BLOCKS: [{"type": "rich_doc", "title": "Sprint Notes & Documentation", "config": {}}]>>>
 
 ACTIONS (Use ONLY when modifying board):
 - Clear entire board: <<<ACTION: CLEAR_BOARD>>>
@@ -644,6 +643,7 @@ Assistant: Why do programmers prefer dark mode? Because light attracts bugs! ðŸ˜
                             {b.type === "pipeline_flow" && <GitCommit size={14} className="text-orange-500 flex-shrink-0" />}
                             {b.type === "metric_kpi" && <TrendingUp size={14} className="text-rose-500 flex-shrink-0" />}
                             {b.type === "link_hub" && <Globe size={14} className="text-indigo-500 flex-shrink-0" />}
+                            {b.type === "rich_doc" && <FileText size={14} className="text-amber-500 flex-shrink-0" />}
 
                             <span className="font-semibold text-slate-800 dark:text-zinc-200 truncate text-[11px]">
                               {b.title}

@@ -4,11 +4,9 @@ import React, { useEffect, useState } from "react";
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { BlockEngine } from "@/components/blocks/BlockEngine";
 import { Scratchpad } from "@/components/ui/Scratchpad";
-import { TopThreePriorities } from "@/components/ui/TopThreePriorities";
 import { DailySummaryModal } from "@/components/ui/DailySummaryModal";
 import { PersonaSelectorModal } from "@/components/ui/PersonaSelectorModal";
 import { CommandPalette } from "@/components/ui/CommandPalette";
-import { ZenFocusMode } from "@/components/ui/ZenFocusMode";
 import { AccomplishmentPortfolioModal } from "@/components/ui/AccomplishmentPortfolioModal";
 import { MorningTriageModal } from "@/components/ui/MorningTriageModal";
 import { 
@@ -16,7 +14,6 @@ import {
   Check,
   FileCheck2,
   Sparkles,
-  Maximize2,
   Award,
   Sunrise,
   Command,
@@ -51,7 +48,6 @@ export default function Dashboard() {
   // Modals state
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
   const [isPersonaModalOpen, setIsPersonaModalOpen] = useState(false);
-  const [isZenModeOpen, setIsZenModeOpen] = useState(false);
   const [isPortfolioModalOpen, setIsPortfolioModalOpen] = useState(false);
   const [isTriageModalOpen, setIsTriageModalOpen] = useState(false);
 
@@ -109,9 +105,6 @@ export default function Dashboard() {
       if (key === "e" && blocks.length > 0) {
         e.preventDefault();
         setIsSummaryModalOpen((prev) => !prev);
-      } else if (key === "z") {
-        e.preventDefault();
-        setIsZenModeOpen((prev) => !prev);
       } else if (key === "s") {
         e.preventDefault();
         toggleScratchpad();
@@ -226,16 +219,6 @@ export default function Dashboard() {
               <span>Triage</span>
             </button>
 
-            {/* Zen Mode button */}
-            <button
-              onClick={() => setIsZenModeOpen(true)}
-              className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs flex-shrink-0"
-              title="Enter full-screen Zen Focus HUD mode (Z)"
-            >
-              <Maximize2 size={13} />
-              <span>Zen HUD</span>
-            </button>
-
             {/* Role Blueprints */}
             <button
               onClick={() => setIsPersonaModalOpen(true)}
@@ -304,9 +287,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Strategic Priorities */}
-        <TopThreePriorities selectedDate={selectedDate} />
-
         {/* Dynamic Block Engine */}
         <BlockEngine selectedDate={selectedDate} />
       </div>
@@ -322,15 +302,8 @@ export default function Dashboard() {
       <CommandPalette
         onOpenStandup={() => setIsSummaryModalOpen(true)}
         onOpenPersona={() => setIsPersonaModalOpen(true)}
-        onOpenZen={() => setIsZenModeOpen(true)}
         onOpenPortfolio={() => setIsPortfolioModalOpen(true)}
         onOpenCustomStudio={() => window.dispatchEvent(new CustomEvent("open-custom-studio"))}
-      />
-
-      {/* Zen Focus HUD Mode */}
-      <ZenFocusMode
-        isOpen={isZenModeOpen}
-        onClose={() => setIsZenModeOpen(false)}
       />
 
       {/* Daily Standup Summary Modal */}

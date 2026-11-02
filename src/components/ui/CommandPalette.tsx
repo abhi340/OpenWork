@@ -31,7 +31,7 @@ import { useRouter } from "next/navigation";
 interface CommandPaletteProps {
   onOpenStandup: () => void;
   onOpenPersona: () => void;
-  onOpenZen: () => void;
+  onOpenZen?: () => void;
   onOpenPortfolio: () => void;
   onOpenCustomStudio?: () => void;
 }
@@ -86,22 +86,6 @@ export function CommandPalette({
 
   const commands = [
     {
-      id: "add_batch",
-      title: "Add Batch Counter (+5 Target)",
-      category: "Work Blocks",
-      icon: CheckCircle2,
-      color: "text-purple-500",
-      action: () => handleAdd("counter_batch", "Daily Outreach Batch", { count: 0, target: 5, unit: "Tasks" })
-    },
-    {
-      id: "add_timer",
-      title: "Add 25m Focus Sprint Timer",
-      category: "Work Blocks",
-      icon: Clock,
-      color: "text-blue-500",
-      action: () => handleAdd("timer_task", "Focus Sprint (25m)", { timeRemaining: 25 * 60, initialDuration: 25 * 60, isRunning: false })
-    },
-    {
       id: "add_checklist",
       title: "Add Dynamic Task Checklist",
       category: "Work Blocks",
@@ -118,12 +102,12 @@ export function CommandPalette({
       action: () => handleAdd("pipeline_flow", "Development Pipeline", { stages: ["Backlog", "In Progress", "Review", "Done"] })
     },
     {
-      id: "add_kpi",
-      title: "Add Metric / KPI Goal Target",
+      id: "add_batch",
+      title: "Add Batch Counter (+5 Target)",
       category: "Work Blocks",
-      icon: TrendingUp,
-      color: "text-rose-500",
-      action: () => handleAdd("metric_kpi", "Daily Revenue Target", { current: 0, target: 2500, prefix: "$", unit: "", step: 50 })
+      icon: CheckCircle2,
+      color: "text-purple-500",
+      action: () => handleAdd("counter_batch", "Daily Outreach Batch", { count: 0, target: 5, unit: "Tasks" })
     },
     {
       id: "add_links",
@@ -137,23 +121,12 @@ export function CommandPalette({
       ])
     },
     {
-      id: "add_table",
-      title: "Add Lead & Pipeline Data Table",
+      id: "add_notes",
+      title: "Add Rich Notes & Scratchpad Doc",
       category: "Work Blocks",
-      icon: TableIcon,
-      color: "text-emerald-500",
-      action: () => handleAdd("table", "Lead Pipeline Grid", { columns: ["Company", "Contact", "Stage", "Next Step"] })
-    },
-    {
-      id: "add_scheduled",
-      title: "Add Scheduled Milestones & Deadlines",
-      category: "Work Blocks",
-      icon: Calendar,
+      icon: FileText,
       color: "text-amber-500",
-      action: () => handleAdd("date_milestones", "Scheduled Milestones & Deadlines", {}, [
-        { id: "1", title: "Target Deliverable Review", dueDate: new Date().toISOString().split("T")[0], completed: false, priority: "high" },
-        { id: "2", title: "Contract Milestone Sign-off", dueDate: new Date(Date.now() + 86400000 * 2).toISOString().split("T")[0], completed: false, priority: "medium" }
-      ])
+      action: () => handleAdd("rich_doc", "Work Notes & Specs", {})
     },
     {
       id: "custom_studio",
@@ -166,14 +139,14 @@ export function CommandPalette({
         if (onOpenCustomStudio) onOpenCustomStudio();
       }
     },
-    {
+    ...(onOpenZen ? [{
       id: "zen_focus",
       title: "Enter Zen Focus HUD Mode (Distraction-Free)",
       category: "Productivity",
       icon: Maximize2,
       color: "text-indigo-500",
       action: () => { setIsOpen(false); onOpenZen(); }
-    },
+    }] : []),
     {
       id: "daily_standup",
       title: "Generate 1-Click Daily Standup Log",

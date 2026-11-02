@@ -30,14 +30,9 @@ import { useWorkspaceStore, BlockType } from "@/store/workspaceStore";
 import { useAuth } from "@/context/AuthContext";
 import { sendAIChatRequest } from "@/lib/ai";
 import { CounterBlock } from "./CounterBlock";
-import { TimerBlock } from "./TimerBlock";
-import { TableBlock } from "./TableBlock";
 import { ChecklistBlock } from "./ChecklistBlock";
 import { PipelineFlowBlock } from "./PipelineFlowBlock";
-import { MetricKPIBlock } from "./MetricKPIBlock";
 import { LinkHubBlock } from "./LinkHubBlock";
-import { DateMilestonesBlock } from "./DateMilestonesBlock";
-import { Calendar } from "lucide-react";
 
 interface CustomBlockModalProps {
   isOpen: boolean;
@@ -46,12 +41,19 @@ interface CustomBlockModalProps {
 
 const ROLE_PRESETS = [
   {
-    role: "Software Dev",
-    icon: Terminal,
-    type: "timer_task" as BlockType,
-    title: "Deep Focus Dev Sprint",
-    tag: "Engineering",
-    minutes: 45
+    role: "Checklist",
+    icon: CheckSquare,
+    type: "checklist" as BlockType,
+    title: "Daily Execution Tasks",
+    tag: "Tasks"
+  },
+  {
+    role: "Pipeline / PM",
+    icon: GitMerge,
+    type: "pipeline_flow" as BlockType,
+    title: "Sprint Feature Stages",
+    tag: "Product",
+    stages: ["Backlog", "In Dev", "Code Review", "QA Testing", "Shipped"]
   },
   {
     role: "Sales SDR",
@@ -63,24 +65,6 @@ const ROLE_PRESETS = [
     unit: "Calls"
   },
   {
-    role: "Project / PM",
-    icon: GitMerge,
-    type: "pipeline_flow" as BlockType,
-    title: "Sprint Feature Stages",
-    tag: "Product",
-    stages: ["Backlog", "In Dev", "Code Review", "QA Testing", "Shipped"]
-  },
-  {
-    role: "KPI Tracker",
-    icon: TrendingUp,
-    type: "metric_kpi" as BlockType,
-    title: "Daily Revenue Target",
-    tag: "Revenue",
-    prefix: "$",
-    target: 2500,
-    unit: "USD"
-  },
-  {
     role: "Daily Links",
     icon: Compass,
     type: "link_hub" as BlockType,
@@ -88,11 +72,11 @@ const ROLE_PRESETS = [
     tag: "Resources"
   },
   {
-    role: "Scheduled Deadlines",
-    icon: Calendar,
-    type: "date_milestones" as BlockType,
-    title: "Deliverables & Deadlines",
-    tag: "Milestones"
+    role: "Notes & Specs",
+    icon: FileText,
+    type: "rich_doc" as BlockType,
+    title: "Technical Notes & Specs",
+    tag: "Docs"
   }
 ];
 
@@ -101,8 +85,8 @@ export function CustomBlockModal({ isOpen, onClose }: CustomBlockModalProps) {
   const { aiConfig } = useAuth();
   
   // Customization state
-  const [selectedType, setSelectedType] = useState<BlockType>("counter_batch");
-  const [title, setTitle] = useState("Daily Target Engine");
+  const [selectedType, setSelectedType] = useState<BlockType>("checklist");
+  const [title, setTitle] = useState("Daily Priority Checklist");
   const [categoryTag, setCategoryTag] = useState("Execution");
   const [isTestDrive, setIsTestDrive] = useState(false);
 
@@ -110,19 +94,8 @@ export function CustomBlockModal({ isOpen, onClose }: CustomBlockModalProps) {
   const [targetCount, setTargetCount] = useState(10);
   const [unitName, setUnitName] = useState("Tasks");
 
-  // Timer options
-  const [timerMinutes, setTimerMinutes] = useState(25);
-
-  // Table options
-  const [columnsList, setColumnsList] = useState(["Item Name", "Owner", "Status", "Notes"]);
-
   // Pipeline options
   const [stagesList, setStagesList] = useState(["Backlog", "In Progress", "Review", "Done"]);
-
-  // Metric KPI options
-  const [kpiPrefix, setKpiPrefix] = useState("");
-  const [kpiTarget, setKpiTarget] = useState(100);
-  const [kpiUnit, setKpiUnit] = useState("pts");
 
   // AI Prompt State
   const [aiPrompt, setAiPrompt] = useState("");
@@ -151,14 +124,11 @@ export function CustomBlockModal({ isOpen, onClose }: CustomBlockModalProps) {
             content: `You are an expert workspace architect. The user will describe a widget or workflow engine.
 Respond ONLY with a valid JSON object matching this schema, no surrounding conversational markdown:
 {
-  "type": "counter_batch" | "timer_task" | "table" | "checklist" | "pipeline_flow" | "metric_kpi" | "link_hub",
+  "type": "checklist" | "pipeline_flow" | "counter_batch" | "link_hub" | "rich_doc",
   "title": string,
   "tag": string,
-  "target": number (optional for counter/kpi),
-  "unit": string (optional),
-  "prefix": string (optional, e.g. "$"),
-  "minutes": number (optional for timer),
-  "columns": string[] (optional for table),
+  "target": number (optional for counter),
+  "unit": string (optional for counter),
   "stages": string[] (optional for pipeline)
 }`
           },
@@ -177,17 +147,8 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
           if (parsed.type) setSelectedType(parsed.type);
           if (parsed.title) setTitle(parsed.title);
           if (parsed.tag) setCategoryTag(parsed.tag);
-          if (parsed.target) {
-            setTargetCount(parsed.target);
-            setKpiTarget(parsed.target);
-          }
-          if (parsed.unit) {
-            setUnitName(parsed.unit);
-            setKpiUnit(parsed.unit);
-          }
-          if (parsed.prefix) setKpiPrefix(parsed.prefix);
-          if (parsed.minutes) setTimerMinutes(parsed.minutes);
-          if (parsed.columns && Array.isArray(parsed.columns)) setColumnsList(parsed.columns);
+          if (parsed.target) setTargetCount(parsed.target);
+          if (parsed.unit) setUnitName(parsed.unit);
           if (parsed.stages && Array.isArray(parsed.stages)) setStagesList(parsed.stages);
         }
       }
@@ -202,17 +163,13 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
     setSelectedType(preset.type);
     setTitle(preset.title);
     setCategoryTag(preset.tag);
-    if (preset.minutes) setTimerMinutes(preset.minutes);
-    if (preset.target) {
-      setTargetCount(preset.target);
-      setKpiTarget(preset.target);
+    if ((preset as any).target) {
+      setTargetCount((preset as any).target);
     }
-    if (preset.unit) {
-      setUnitName(preset.unit);
-      setKpiUnit(preset.unit);
+    if ((preset as any).unit) {
+      setUnitName((preset as any).unit);
     }
-    if (preset.prefix) setKpiPrefix(preset.prefix);
-    if (preset.stages) setStagesList(preset.stages);
+    if ((preset as any).stages) setStagesList((preset as any).stages);
   };
 
   const handleCreate = (e: React.FormEvent) => {
@@ -225,14 +182,7 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
 
     let initialItems: any[] = [];
 
-    if (selectedType === "counter_batch") {
-      config = { ...config, count: 0, target: targetCount, unit: unitName };
-    } else if (selectedType === "timer_task") {
-      config = { ...config, timeRemaining: timerMinutes * 60, initialDuration: timerMinutes * 60, isRunning: false };
-    } else if (selectedType === "table") {
-      config = { ...config, columns: columnsList };
-      initialItems = [{ [columnsList[0]]: "Example record", [columnsList[1] || "Status"]: "Active" }];
-    } else if (selectedType === "checklist") {
+    if (selectedType === "checklist") {
       initialItems = [
         { id: "1", text: "Key priority task #1", completed: false },
         { id: "2", text: "Follow-up deliverable #2", completed: false }
@@ -243,16 +193,11 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
         { id: "1", title: "First milestone item", stage: stagesList[0] },
         { id: "2", title: "Active work in progress", stage: stagesList[1] || stagesList[0] }
       ];
-    } else if (selectedType === "metric_kpi") {
-      config = { ...config, current: 0, target: kpiTarget, unit: kpiUnit, prefix: kpiPrefix, step: 1 };
+    } else if (selectedType === "counter_batch") {
+      config = { ...config, count: 0, target: targetCount, unit: unitName };
     } else if (selectedType === "link_hub") {
       initialItems = [
         { id: "1", title: "Primary App Tool", url: "https://google.com" }
-      ];
-    } else if (selectedType === "date_milestones") {
-      initialItems = [
-        { id: "1", title: "Key Deliverable Review", dueDate: new Date().toISOString().split("T")[0], completed: false, priority: "high" },
-        { id: "2", title: "Upcoming Strategic Milestone", dueDate: new Date(Date.now() + 86400000 * 2).toISOString().split("T")[0], completed: false, priority: "medium" }
       ];
     }
 
@@ -285,29 +230,16 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
     config: 
       selectedType === "counter_batch" 
         ? { count: 3, target: targetCount, unit: unitName }
-        : selectedType === "timer_task"
-        ? { timeRemaining: timerMinutes * 60, initialDuration: timerMinutes * 60, isRunning: false }
-        : selectedType === "table"
-        ? { columns: columnsList }
         : selectedType === "pipeline_flow"
         ? { stages: stagesList }
-        : selectedType === "metric_kpi"
-        ? { current: Math.round(kpiTarget * 0.45), target: kpiTarget, unit: kpiUnit, prefix: kpiPrefix, step: 1 }
         : {},
     items: 
       selectedType === "checklist"
         ? [{ id: "p1", text: "Preview task item", completed: false }]
         : selectedType === "pipeline_flow"
         ? [{ id: "p1", title: "Sample card", stage: stagesList[0] }]
-        : selectedType === "table"
-        ? [{ [columnsList[0]]: "Sample Item", [columnsList[1] || "Status"]: "In Progress" }]
         : selectedType === "link_hub"
         ? [{ id: "l1", title: "Key Workspace Link", url: "https://google.com" }]
-        : selectedType === "date_milestones"
-        ? [
-            { id: "p1", title: "Target Deliverable", dueDate: new Date().toISOString().split("T")[0], completed: false, priority: "high" },
-            { id: "p2", title: "Next Phase Sign-off", dueDate: new Date(Date.now() + 86400000 * 2).toISOString().split("T")[0], completed: false, priority: "medium" }
-          ]
         : ["Sample logged item detail"]
   };
 
@@ -402,16 +334,12 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
             <label className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
               Select Engine Architecture
             </label>
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
               {[
-                { type: "counter_batch", label: "Batch Counter", icon: CheckCircle2 },
-                { type: "timer_task", label: "Focus Sprint", icon: Clock },
-                { type: "table", label: "Data Grid", icon: TableIcon },
                 { type: "checklist", label: "Checklist", icon: CheckSquare },
                 { type: "pipeline_flow", label: "Stage Flow", icon: GitCommit },
-                { type: "metric_kpi", label: "KPI Target", icon: TrendingUp },
+                { type: "counter_batch", label: "Batch Counter", icon: CheckCircle2 },
                 { type: "link_hub", label: "Launch Links", icon: Globe },
-                { type: "date_milestones", label: "Scheduled", icon: Calendar },
                 { type: "rich_doc", label: "Notes Doc", icon: FileText },
               ].map((item) => {
                 const Icon = item.icon;
@@ -422,14 +350,11 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
                     type="button"
                     onClick={() => {
                       setSelectedType(item.type as BlockType);
-                      if (item.type === "counter_batch") setTitle("Outreach / Call Batch");
-                      if (item.type === "timer_task") setTitle("Deep Focus Sprint");
-                      if (item.type === "table") setTitle("Lead & Deal Pipeline");
-                      if (item.type === "checklist") setTitle("Release Day Checklist");
+                      if (item.type === "checklist") setTitle("Daily Priority Checklist");
                       if (item.type === "pipeline_flow") setTitle("Development Stage Flow");
-                      if (item.type === "metric_kpi") setTitle("Daily Revenue Goal");
+                      if (item.type === "counter_batch") setTitle("Outreach / Call Batch");
                       if (item.type === "link_hub") setTitle("Quick Launchpad Dock");
-                      if (item.type === "date_milestones") setTitle("Scheduled Milestones & Deadlines");
+                      if (item.type === "rich_doc") setTitle("Work Notes & Specs");
                     }}
                     className={`p-2 rounded-xl border text-left flex flex-col justify-between transition-all ${
                       isSelected
@@ -505,84 +430,7 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
               </div>
             )}
 
-            {selectedType === "timer_task" && (
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-700 dark:text-zinc-300">Sprint Duration (Minutes)</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={1}
-                    max={180}
-                    value={timerMinutes}
-                    onChange={(e) => setTimerMinutes(parseInt(e.target.value) || 25)}
-                    className="w-24 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"
-                  />
-                  <div className="flex gap-1">
-                    {[15, 25, 45, 60].map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => setTimerMinutes(m)}
-                        className={`px-2 py-1 text-xs rounded border ${
-                          timerMinutes === m
-                            ? "bg-blue-600 text-white border-blue-600 font-bold"
-                            : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400"
-                        }`}
-                      >
-                        {m}m
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
 
-            {selectedType === "metric_kpi" && (
-              <div className="grid grid-cols-3 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-700 dark:text-zinc-300">Prefix</label>
-                  <input
-                    type="text"
-                    value={kpiPrefix}
-                    onChange={(e) => setKpiPrefix(e.target.value)}
-                    placeholder="e.g. $"
-                    className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-700 dark:text-zinc-300">Target Value</label>
-                  <input
-                    type="number"
-                    value={kpiTarget}
-                    onChange={(e) => setKpiTarget(parseFloat(e.target.value) || 100)}
-                    className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-700 dark:text-zinc-300">Unit Suffix</label>
-                  <input
-                    type="text"
-                    value={kpiUnit}
-                    onChange={(e) => setKpiUnit(e.target.value)}
-                    placeholder="e.g. pts, USD"
-                    className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-2 py-1.5 text-xs text-slate-900 dark:text-zinc-100 font-mono outline-none focus:border-blue-500"
-                  />
-                </div>
-              </div>
-            )}
-
-            {selectedType === "table" && (
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-slate-700 dark:text-zinc-300">Grid Columns (Comma-separated)</label>
-                <input
-                  type="text"
-                  value={columnsList.join(", ")}
-                  onChange={(e) => setColumnsList(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
-                  placeholder="e.g. Name, Company, Stage, Deal Size"
-                  className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-900 dark:text-zinc-100 outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-            )}
 
             {selectedType === "pipeline_flow" && (
               <div className="space-y-2">
@@ -654,14 +502,10 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
             }`}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  {selectedType === "counter_batch" && <CheckCircle2 size={16} className="text-purple-500" />}
-                  {selectedType === "timer_task" && <Clock size={16} className="text-blue-500" />}
-                  {selectedType === "table" && <TableIcon size={16} className="text-emerald-500" />}
                   {selectedType === "checklist" && <CheckSquare size={16} className="text-cyan-500" />}
                   {selectedType === "pipeline_flow" && <GitCommit size={16} className="text-orange-500" />}
-                  {selectedType === "metric_kpi" && <TrendingUp size={16} className="text-rose-500" />}
+                  {selectedType === "counter_batch" && <CheckCircle2 size={16} className="text-purple-500" />}
                   {selectedType === "link_hub" && <Globe size={16} className="text-indigo-500" />}
-                  {selectedType === "date_milestones" && <Calendar size={16} className="text-amber-500" />}
                   {selectedType === "rich_doc" && <FileText size={16} className="text-amber-500" />}
 
                   <h4 className="font-bold text-sm text-slate-900 dark:text-zinc-100">
@@ -676,14 +520,10 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
 
               {/* Body Preview */}
               <div className="mt-2">
-                {selectedType === "counter_batch" && <CounterBlock block={activePreviewBlock as any} onUpdate={handlePreviewUpdate} />}
-                {selectedType === "timer_task" && <TimerBlock block={activePreviewBlock as any} onUpdate={handlePreviewUpdate} />}
-                {selectedType === "table" && <TableBlock block={activePreviewBlock as any} onUpdate={handlePreviewUpdate} />}
                 {selectedType === "checklist" && <ChecklistBlock block={activePreviewBlock as any} onUpdate={handlePreviewUpdate} />}
                 {selectedType === "pipeline_flow" && <PipelineFlowBlock block={activePreviewBlock as any} onUpdate={handlePreviewUpdate} />}
-                {selectedType === "metric_kpi" && <MetricKPIBlock block={activePreviewBlock as any} onUpdate={handlePreviewUpdate} />}
+                {selectedType === "counter_batch" && <CounterBlock block={activePreviewBlock as any} onUpdate={handlePreviewUpdate} />}
                 {selectedType === "link_hub" && <LinkHubBlock block={activePreviewBlock as any} onUpdate={handlePreviewUpdate} />}
-                {selectedType === "date_milestones" && <DateMilestonesBlock block={activePreviewBlock as any} onUpdate={handlePreviewUpdate} />}
                 {selectedType === "rich_doc" && (
                   <div className="mt-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg text-xs text-slate-600 dark:text-zinc-400">
                     Document notes preview connected to right-pane Scratchpad.
