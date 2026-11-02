@@ -4,15 +4,12 @@ import React, { useState, useEffect, useRef } from "react";
 import { 
   Search, 
   Plus, 
-  Clock, 
   CheckCircle2, 
-  Table as TableIcon, 
   FileText, 
   Sun, 
   Moon, 
   FileCheck2, 
   Sparkles, 
-  Maximize2, 
   Award, 
   Layers, 
   Settings, 
@@ -20,9 +17,7 @@ import {
   CheckSquare,
   GitCommit,
   Sliders,
-  TrendingUp,
-  Globe,
-  Calendar
+  Globe
 } from "lucide-react";
 import { useWorkspaceStore, BlockType } from "@/store/workspaceStore";
 import { useTheme } from "@/context/ThemeContext";
@@ -31,7 +26,6 @@ import { useRouter } from "next/navigation";
 interface CommandPaletteProps {
   onOpenStandup: () => void;
   onOpenPersona: () => void;
-  onOpenZen?: () => void;
   onOpenPortfolio: () => void;
   onOpenCustomStudio?: () => void;
 }
@@ -39,7 +33,6 @@ interface CommandPaletteProps {
 export function CommandPalette({
   onOpenStandup,
   onOpenPersona,
-  onOpenZen,
   onOpenPortfolio,
   onOpenCustomStudio
 }: CommandPaletteProps) {
@@ -139,14 +132,6 @@ export function CommandPalette({
         if (onOpenCustomStudio) onOpenCustomStudio();
       }
     },
-    ...(onOpenZen ? [{
-      id: "zen_focus",
-      title: "Enter Zen Focus HUD Mode (Distraction-Free)",
-      category: "Productivity",
-      icon: Maximize2,
-      color: "text-indigo-500",
-      action: () => { setIsOpen(false); onOpenZen(); }
-    }] : []),
     {
       id: "daily_standup",
       title: "Generate 1-Click Daily Standup Log",

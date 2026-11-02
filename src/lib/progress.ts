@@ -19,10 +19,7 @@ export function calculateBoardProgress(blocks: WorkBlock[], currentDateStr?: str
     };
   }
 
-  const todayDateStr = currentDateStr || (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  })();
+  const todayDateStr = currentDateStr || new Date().toLocaleDateString('en-CA');
 
   let completedUnits = 0;
   let totalUnits = 0;
@@ -81,17 +78,6 @@ export function calculateBoardProgress(blocks: WorkBlock[], currentDateStr?: str
       if (count >= target) {
         completedBlocks++;
       }
-    } else if (block.type === "date_milestones") {
-      const items = block.items || [];
-      if (items.length > 0) {
-        actionableBlocks++;
-        const done = items.filter((i: any) => i.completed).length;
-        completedUnits += done;
-        totalUnits += items.length;
-        if (done === items.length) {
-          completedBlocks++;
-        }
-      }
     } else if (block.type === "pipeline_flow") {
       const items = block.items || [];
       if (items.length > 0) {
@@ -105,35 +91,6 @@ export function calculateBoardProgress(blocks: WorkBlock[], currentDateStr?: str
         if (done === items.length) {
           completedBlocks++;
         }
-      }
-    } else if (block.type === "metric_kpi") {
-      actionableBlocks++;
-      const target = Number(block.config?.target) || 100;
-      let current = 0;
-      if (block.config?.dailyValues?.[todayDateStr] !== undefined) {
-        current = Number(block.config.dailyValues[todayDateStr]);
-      } else if (block.config?.lastActiveDate === todayDateStr || block.config?.createdDate === todayDateStr) {
-        current = Number(block.config?.current) || 0;
-      } else if (!block.config?.lastActiveDate && !block.config?.createdDate) {
-        current = Number(block.config?.current) || 0;
-      } else {
-        current = 0;
-      }
-      totalUnits += 1;
-      if (current >= target) {
-        completedUnits += 1;
-        completedBlocks++;
-      }
-    } else if (block.type === "timer_task") {
-      actionableBlocks++;
-      const isPreviousDay = block.config?.lastActiveDate && block.config.lastActiveDate !== todayDateStr;
-      const timeRemaining = isPreviousDay 
-        ? (Number(block.config?.initialDuration) || 1500) 
-        : (Number(block.config?.timeRemaining) ?? 1500);
-      totalUnits += 1;
-      if (timeRemaining === 0) {
-        completedUnits += 1;
-        completedBlocks++;
       }
     }
   }

@@ -39,11 +39,22 @@ interface CustomBlockModalProps {
   onClose: () => void;
 }
 
-const ROLE_PRESETS = [
+interface RolePreset {
+  role: string;
+  icon: any;
+  type: BlockType;
+  title: string;
+  tag: string;
+  target?: number;
+  unit?: string;
+  stages?: string[];
+}
+
+const ROLE_PRESETS: RolePreset[] = [
   {
     role: "Checklist",
     icon: CheckSquare,
-    type: "checklist" as BlockType,
+    type: "checklist",
     title: "Daily Execution Tasks",
     tag: "Tasks"
   },
@@ -159,17 +170,13 @@ Respond ONLY with a valid JSON object matching this schema, no surrounding conve
     }
   };
 
-  const handleApplyPreset = (preset: typeof ROLE_PRESETS[0]) => {
+  const handleApplyPreset = (preset: RolePreset) => {
     setSelectedType(preset.type);
     setTitle(preset.title);
     setCategoryTag(preset.tag);
-    if ((preset as any).target) {
-      setTargetCount((preset as any).target);
-    }
-    if ((preset as any).unit) {
-      setUnitName((preset as any).unit);
-    }
-    if ((preset as any).stages) setStagesList((preset as any).stages);
+    if (preset.target) setTargetCount(preset.target);
+    if (preset.unit) setUnitName(preset.unit);
+    if (preset.stages) setStagesList(preset.stages);
   };
 
   const handleCreate = (e: React.FormEvent) => {

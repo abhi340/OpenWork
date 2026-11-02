@@ -34,10 +34,7 @@ export function MobileNavbar() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isNotesSheetOpen, setIsNotesSheetOpen] = useState(false);
 
-  const todayDateStr = (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  })();
+  const todayDateStr = new Date().toLocaleDateString('en-CA');
   const progress = calculateBoardProgress(blocks, todayDateStr);
 
   return (

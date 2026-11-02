@@ -5,9 +5,7 @@ import { useWorkspaceStore, BlockType } from "@/store/workspaceStore";
 import { 
   Plus, 
   Trash2, 
-  Clock, 
   CheckCircle2, 
-  Table as TableIcon, 
   FileText, 
   ChevronUp, 
   ChevronDown, 
@@ -18,20 +16,15 @@ import {
   CheckSquare,
   GitCommit,
   Wand2,
-  TrendingUp,
   Globe,
   LayoutGrid,
   Sparkles,
   Calendar
 } from "lucide-react";
 import { CounterBlock } from "./CounterBlock";
-import { TimerBlock } from "./TimerBlock";
-import { TableBlock } from "./TableBlock";
 import { ChecklistBlock } from "./ChecklistBlock";
 import { PipelineFlowBlock } from "./PipelineFlowBlock";
-import { MetricKPIBlock } from "./MetricKPIBlock";
 import { LinkHubBlock } from "./LinkHubBlock";
-import { DateMilestonesBlock } from "./DateMilestonesBlock";
 import { CustomBlockModal } from "./CustomBlockModal";
 
 export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date }) {
@@ -213,14 +206,10 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
                     <GripVertical size={14} />
                   </div>
 
-                  {block.type === "counter_batch" && <CheckCircle2 size={16} className="text-purple-600 dark:text-purple-400 flex-shrink-0" />}
-                  {block.type === "timer_task" && <Clock size={16} className="text-blue-600 dark:text-blue-400 flex-shrink-0" />}
-                  {block.type === "table" && <TableIcon size={16} className="text-emerald-600 dark:text-emerald-400 flex-shrink-0" />}
                   {block.type === "checklist" && <CheckSquare size={16} className="text-cyan-600 dark:text-cyan-400 flex-shrink-0" />}
                   {block.type === "pipeline_flow" && <GitCommit size={16} className="text-orange-600 dark:text-orange-400 flex-shrink-0" />}
-                  {block.type === "metric_kpi" && <TrendingUp size={16} className="text-rose-600 dark:text-rose-400 flex-shrink-0" />}
+                  {block.type === "counter_batch" && <CheckCircle2 size={16} className="text-purple-600 dark:text-purple-400 flex-shrink-0" />}
                   {block.type === "link_hub" && <Globe size={16} className="text-indigo-600 dark:text-indigo-400 flex-shrink-0" />}
-                  {block.type === "date_milestones" && <Calendar size={16} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />}
                   {block.type === "rich_doc" && <FileText size={16} className="text-amber-600 dark:text-amber-400 flex-shrink-0" />}
 
                   {editingTitleId === block.id ? (
@@ -316,14 +305,10 @@ export function BlockEngine({ selectedDate = new Date() }: { selectedDate?: Date
 
               {/* Body */}
               <div>
-                {block.type === "counter_batch" && <CounterBlock block={block} currentDate={currentDateStr} />}
-                {block.type === "timer_task" && <TimerBlock block={block} currentDate={currentDateStr} />}
-                {block.type === "table" && <TableBlock block={block} />}
                 {block.type === "checklist" && <ChecklistBlock block={block} currentDate={currentDateStr} />}
                 {block.type === "pipeline_flow" && <PipelineFlowBlock block={block} />}
-                {block.type === "metric_kpi" && <MetricKPIBlock block={block} currentDate={currentDateStr} />}
+                {block.type === "counter_batch" && <CounterBlock block={block} currentDate={currentDateStr} />}
                 {block.type === "link_hub" && <LinkHubBlock block={block} />}
-                {block.type === "date_milestones" && <DateMilestonesBlock block={block} />}
                 {block.type === "rich_doc" && (
                   <div className="mt-3 p-3 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg text-xs text-slate-600 dark:text-zinc-400">
                     Click this block to edit its full document scratchpad in the right panel.
